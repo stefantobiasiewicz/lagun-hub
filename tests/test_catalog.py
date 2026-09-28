@@ -18,6 +18,7 @@ from lagunhub.protocol.endpoints.definition import (
 )
 from lagunhub.protocol.registry import CommonAttribute, EndpointType, ResultCode
 from tests.node.devices import key1, relay1
+from tests.node.endpoints.diagnostics import Diagnostics
 from tests.node.endpoints.output import Output
 
 UID_A = bytes(range(8))
@@ -64,6 +65,15 @@ class TestCatalogConsistency:
 
     def test_the_common_attributes_come_from_the_registry(self) -> None:
         assert set(COMMON) == {attribute.value for attribute in CommonAttribute}
+
+    def test_a_system_endpoint_refuses_to_be_disabled(self) -> None:
+        """`Enabled` is always 1 on a system endpoint (01-model-danych.md §4.1); the
+        rest of its common attributes are writable as anywhere else."""
+        diagnostics = Diagnostics()
+        assert diagnostics.write(CommonAttribute.Enabled, b"\x00") == ResultCode.INVALID_VALUE
+        assert diagnostics.write(CommonAttribute.Enabled, b"\x01") == ResultCode.OK
+        assert diagnostics.write(CommonAttribute.ReportInterval, b"\x3c\x00") == ResultCode.OK
+        assert diagnostics.values[CommonAttribute.Channel] == 0
 
     def test_an_unknown_type_says_what_it_knows(self) -> None:
         with pytest.raises(ValueError, match="unknown endpoint type"):

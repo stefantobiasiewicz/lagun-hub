@@ -35,7 +35,12 @@ from lagunhub.core.model import Uid
 from lagunhub.protocol.endpoints import by_name
 from lagunhub.protocol.endpoints.definition import AttributeDef, encode_fields
 from lagunhub.protocol.endpoints.enums import coerce
-from lagunhub.protocol.registry import EndpointType, MessageKind
+from lagunhub.protocol.registry import (
+    FIRST_FUNCTIONAL_ENDPOINT,
+    CommonAttribute,
+    EndpointType,
+    MessageKind,
+)
 from lagunhub.protocol.values import SCALARS, Value
 
 FILES = ("hub.yaml", "nodes.yaml", "bindings.yaml")
@@ -240,6 +245,7 @@ def _endpoint(
             )
         meta = _attribute(type_name.name, type_name.attribute(str(name)), alias, number)
         attributes[meta.id] = _value(meta, value, alias, number)
+        _system_stays_enabled(meta, attributes[meta.id], alias, number)
     return EndpointConfig(
         type=EndpointType[type_name.name] if type_name is not None else None,
         name=str(raw.get("name", "")),
@@ -258,6 +264,19 @@ def _attribute(type_name: str, meta: AttributeDef, alias: str, number: int) -> A
             "(KONFIGURACJA.md §7)"
         )
     return meta
+
+
+def _system_stays_enabled(meta: AttributeDef, value: Value, alias: str, number: int) -> None:
+    """A system endpoint is always enabled — the node answers `Enabled = 0` with
+    `INVALID_VALUE` (01-model-danych.md §4.1).
+
+    Caught here rather than left to the node: accepted into the file, the value would
+    have reconciling write it again and again, each time refused.
+    """
+    if number < FIRST_FUNCTIONAL_ENDPOINT and meta.id == CommonAttribute.Enabled and not value:
+        raise ConfigError(
+            f"{alias} ep{number}: a system endpoint cannot be disabled (01-model-danych.md §4.1)"
+        )
 
 
 def _value(meta: AttributeDef, raw: Any, alias: str, number: int) -> Value:

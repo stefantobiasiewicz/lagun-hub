@@ -131,6 +131,23 @@ class TestStaticValidation:
         with pytest.raises(ConfigError, match="is state"):
             load(save(tmp_path, content))
 
+    def test_a_system_endpoint_cannot_be_disabled(self, tmp_path: Path) -> None:
+        """The node would refuse it; in the file it would be reconciled forever
+        (01-model-danych.md §4.1)."""
+        content = BASE.replace(
+            "      4: { type: KeyInput,",
+            "      1: { type: Diagnostics, Enabled: false }\n      4: { type: KeyInput,",
+        )
+        with pytest.raises(ConfigError, match="system endpoint cannot be disabled"):
+            load(save(tmp_path, content))
+
+    def test_a_system_endpoint_takes_reporting_settings(self, tmp_path: Path) -> None:
+        content = BASE.replace(
+            "      4: { type: KeyInput,",
+            "      1: { type: Diagnostics, ReportInterval: 60 }\n      4: { type: KeyInput,",
+        )
+        load(save(tmp_path, content))
+
     def test_an_attribute_out_of_range(self, tmp_path: Path) -> None:
         content = BASE.replace("DebounceTime: 25", "DebounceTime: 1000")
         with pytest.raises(ConfigError, match="is outside 5…100"):

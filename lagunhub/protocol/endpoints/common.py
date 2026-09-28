@@ -1,4 +1,4 @@
-"""Common attributes — present on every endpoint (01-model-danych.md §4, `OTWARTE.md` B1).
+"""Common attributes — present on every endpoint, system ones included (01-model-danych.md §4).
 
 The definition lives in [`definition.py`](definition.py), because `TypeDef` adds them
 itself. This module is only the name one reaches for them by.

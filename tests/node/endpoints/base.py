@@ -203,11 +203,15 @@ class FunctionalEndpoint(Endpoint):
 class SystemEndpoint(Endpoint):
     """An endpoint whose number the specification fixes.
 
-    **It has the common attributes too** — see `OTWARTE.md` in the specification repository,
-    item B1. Chapter 01 §4 says "every functional endpoint", §5.3 adds "functional only",
-    and `Diagnostics` §5.4 gives itself a default `ReportInterval`, which is a common
-    attribute. Until that is settled we assume it has them — otherwise the hub has nothing
-    to work out the silence threshold from (06-cykl-zycia-urzadzenia.md §5.1).
+    **It has the common attributes too** (01-model-danych.md §4.1) — otherwise the hub
+    would have nothing to work out the silence threshold from
+    (06-cykl-zycia-urzadzenia.md §5.1). Two of them are fixed: `Channel` is always 0,
+    and `Enabled` always 1 — a write of 0 is refused.
     """
 
     EXTRA_ATTRS: ClassVar[dict[int, AttributeDef]] = COMMON
+
+    def write(self, attribute: int, data: bytes) -> ResultCode:
+        if attribute == CommonAttribute.Enabled and data[:1] == b"\x00":
+            return ResultCode.INVALID_VALUE
+        return super().write(attribute, data)

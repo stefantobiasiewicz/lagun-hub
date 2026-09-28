@@ -144,9 +144,9 @@ class TypeDef:
         skipped the attribute. All the worse because the common attributes are exactly
         the ones most often adjusted.
 
-        We add them to every type, the system ones included — the same as a node
-        does, and for the same reason (`OTWARTE.md`, item B1: 01-model-danych.md §4 says
-        "functional", while `Diagnostics` §5.4 gives a `ReportInterval` of its own).
+        We add them to every type, the system ones included — the specification gives
+        every endpoint the full set (01-model-danych.md §4.1), not least because the
+        silence threshold is worked out from the `ReportInterval` of `Diagnostics`.
 
         The 0xF0-0xFF range belongs to the specification, so a type that reaches into
         it **will not start at all**. A test used to guard this; now the import does,

@@ -340,23 +340,12 @@ Podstawienie referencji jest w CPythonie niepodzielne, a RX czyta ją **raz na r
 zmiennej lokalnej. Nie ma stanu pośredniego: RX widzi albo stary snapshot w całości, albo
 nowy w całości. Locka nie ma w ogóle — i nie ma czego debugować, gdy zacznie się zacinać.
 
-### 5.4 Rozjazd ze specyfikacją — do domknięcia
+### 5.4 Agreement with the specification
 
-[`07-hub.md`](../lagunbus-spec/07-hub.md) §4.2 mówi wprost: dopasowanie powiązania **poniżej
-jednej milisekundy**, bez kolejkowania i bez odkładania do następnego przebiegu pętli. Jest
-to zdanie normatywne, a hub przyjmujący 50 ms formalnie się z nim rozjeżdża.
-
-Warto to domknąć w jedną albo w drugą stronę, bo dwie prawdy naraz zawsze kiedyś wybuchną:
-
-| Wyjście | Co oznacza |
-|---|---|
-| **złagodzić §4.2 w specyfikacji** | zapisać budżet rzędu kilkudziesięciu ms; zdanie o zakazie kolejkowania zostaje, bo nadal jest słuszne co do ducha |
-| zostawić §4.2 i mierzyć się z nim | architektura i tak mieści się w 1 ms; zapas byłby wtedy wymaganiem, a nie zapasem |
-
-Rekomendacja: **pierwsze**. Milisekunda była liczbą wziętą z wyobrażenia o sprzęcie, a nie
-z tego, co człowiek zauważa — a specyfikacja, która stawia wymagania ostrzejsze, niż komukolwiek
-potrzeba, zmusza każdą przyszłą implementację do tłumaczenia się z niczego. Prowadzi to
-[`OTWARTE.md`](../lagunbus-spec/OTWARTE.md), nie ten dokument.
+The specification adopted the same budget: [`07-hub.md`](../lagunbus-spec/07-hub.md) §4.2
+requires at most 50 ms from receiving an event to handing the command to the bus, with no
+queuing of bindings. It used to say "below 1 ms" and the hub knowingly diverged from it —
+that divergence is closed.
 
 ---
 
@@ -1089,7 +1078,7 @@ Dwie rzeczy, które to częściowo nadrabiają i są tanie:
 
 | Poz. | Czego dotyczy | Kiedy rozstrzygniemy |
 |---|---|---|
-| **H1** | czy złagodzić §4.2 w specyfikacji, czy trzymać 1 ms | §5.4 — do decyzji autora specyfikacji |
+| **H1** | czy złagodzić §4.2 w specyfikacji, czy trzymać 1 ms | **settled**: the specification adopted 50 ms — §5.4 |
 | **H2** | kształt tematów MQTT i mapowanie kanał → encja HA | razem z adapterem MQTT (§14) |
 | **H6** | uwierzytelnianie API | **rozstrzygnięte**: jeden token na hub, wymagany zawsze, losowany przy pierwszym starcie i zapisywany z prawami `0600`. Nasłuch domyślnie na pętli lokalnej — [`adapters/http/auth.py`](lagunhub/adapters/http/auth.py) |
 | **H9** | podział pakietów | **zrobione**: `protocol/` i `core/` (§12); granica `adapters/` czeka na drugiego konsumenta |
@@ -1160,7 +1149,7 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 | Co | Dlaczego |
 |---|---|
 | Aktualizacja firmware przez magistralę | segmenty jej nie uniosą; wymaga własnego mechanizmu ([`05-mapowanie-can.md`](../lagunbus-spec/05-mapowanie-can.md) §6.9) |
-| Wymiana modułu z zachowaniem konfiguracji | specyfikacja odkłada to poza v1 ([`06-cykl-zycia-urzadzenia.md`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md) §8) |
+| Wymiana modułu z zachowaniem konfiguracji | the specification defers it past v1 ([`DECYZJE.md`](../lagunbus-spec/DECYZJE.md), "Wymiana urządzenia poza zakresem v1") |
 | Harmonogramy, tryby domu, obecność ludzi | to jest Home Assistant, nie hub (§1) |
 | Grupy i sceny zapisywane do węzłów | konfiguracja je opisuje, uzgadnianie przepisuje na razie tylko atrybuty; `GetMembership` jest segmentowane, a scen hub nie umie odczytać |
 | Zabezpieczenie kryptograficzne magistrali | rozstrzygnięte przeciw w specyfikacji |
