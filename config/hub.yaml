@@ -1,0 +1,27 @@
+# The hub's own settings.
+#
+# The speed is set not by the hub but by the kernel. The value is here so that it can be
+# changed in one place; `lagun-hub` prints the command that applies it.
+
+buses:
+  - name: ground-floor
+    channel: vcan0
+    bitrate: 500000
+
+# The key is the group NUMBER, because that is what travels in a frame's ADDRESS field.
+# The name is a label — the same rule as with nodes, where the key is the Uid and the
+# alias is a field.
+groups:
+  1: { name: all-lights }
+  5: { name: living-room }
+
+accept_new: false
+
+# The hub server — the service channel for the CLI, a front end and everything else.
+#
+# host defaults to the loopback. The hub drives physical things, so exposing it to the
+# network is to be a deliberate entry, not the result of unread documentation.
+# An empty token means "draw one and save it to config/api-token" — not "no token".
+api:
+  host: 127.0.0.1
+  port: 8080

@@ -1,0 +1,42 @@
+# Nodes — the key is the Uid, because that is what identity is.
+#
+# The alias is a label given by a person and is there only to make the file readable:
+# bindings refer to it instead of to sixteen bytes. Were it the key, the file would look
+# as if the hub knew "that is kitchen-relay" — while all it knows is that somebody
+# named THIS Uid that way.
+#
+# There are no addresses here and there will not be: an address is a route, not an
+# identity. The hub learns it at joining and keeps it in its database
+# (KONFIGURACJA.md §11).
+
+nodes:
+  "0001020304050607":
+    alias: kitchen-switch
+    name: "The kitchen key"
+    room: kitchen
+    endpoints:
+      4:
+        type: KeyInput
+        name: "Left key"
+        DebounceTime: 25
+        HoldThreshold: 550
+
+        EventMode: CLICK
+        MultiClickWindow: 200
+        MaxClicks: 2
+        HoldEnabled: true
+        Invert: true
+  "08090a0b0c0d0e0f":
+    alias: kitchen-relay
+    name: "The lamp over the table"
+    room: kitchen
+    endpoints:
+      4:
+        type: Output
+        name: "The lamp over the table"
+        Purpose: LIGHT
+        PowerOnBehaviour: "OFF"
+        groups: [all-lights, living-room]
+  a201020304050607:
+    name: test
+    alias: test

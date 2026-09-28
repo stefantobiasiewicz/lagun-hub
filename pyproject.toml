@@ -1,0 +1,57 @@
+[project]
+name = "lagunhub"
+version = "0.1.0"
+description = "A LagunBus installation hub"
+requires-python = ">=3.12"
+dependencies = [
+    "ruamel.yaml>=0.18",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+
+[project.scripts]
+lagun-hub = "lagunhub.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# The package list is discovered, not transcribed by hand. It was transcribed until
+# stage 10, and then it came out why not: the wheel did not contain
+# `lagunhub.adapters`, so `pip install lagunhub` gave a hub without a server and
+# without a shell. A development install does not show it, because it reads straight
+# from the directory.
+#
+# The package is the hub ALONE. The node double lives in `tests/node/` and is a test
+# tool, not part of what lands on a Raspberry Pi.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lagunhub*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# A generated file — its shape is settled by tools/generate_registry.py, not by ruff.
+# Formatting it here would put it out of step with the generator at the first run.
+extend-exclude = ["lagunhub/protocol/registry.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# Dashes and typographic quotes in comments and docstrings are intended, not a paste
+# accident; the registry also carries the specification's Polish names.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lagunhub", "tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: uruchamia mypy w podprocesie; `-m 'not slow'` je pomija",
+]

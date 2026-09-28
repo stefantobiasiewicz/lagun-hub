@@ -1,0 +1,27 @@
+# Bindings: when this happens, do that.
+#
+# Both sides are keyed by Uid — through an alias the hub translates on load. The `type`
+# field is mandatory and does what `expect` in KONFIGURACJA.md §10 promises: it lets a
+# typo in `Toogle` be caught without access to the hardware.
+
+bindings:
+- from:
+    node: test
+    endpoint: 4
+    type: KeyInput
+    event: Click
+  to:
+    node: kitchen-relay
+    endpoint: 4
+    type: Output
+    command: Toggle
+- from:
+    node: kitchen-switch
+    endpoint: 4
+    type: KeyInput
+    event: Click
+  to:
+    node: kitchen-relay
+    endpoint: 4
+    type: Output
+    command: Toggle
