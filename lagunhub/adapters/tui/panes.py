@@ -345,7 +345,14 @@ def _joining_detail(state: State) -> Pane:
     status = "OPEN" if view and view.accepting else "closed"
     selected = state.selected()
     prose = [f"joining of new nodes: {status}"]
-    if isinstance(selected, JoinView) and selected.uid is None and not selected.address:
+    if isinstance(selected, JoinView) and selected.state == "PENDING" and selected.address:
+        prose += [
+            "",
+            f"This node works at 0x{selected.address:03X}, which the hub did not know —",
+            "a lost or old database, or a module used elsewhere.",
+            "It does not get in by itself, not even with joining open: decide.",
+        ]
+    elif isinstance(selected, JoinView) and selected.uid is None and not selected.address:
         prose += [
             "",
             "This node announces itself and gets no address.",
@@ -429,6 +436,9 @@ def context_keys(state: State) -> tuple[tuple[str, str], ...]:
             out.append(("-", "remove the binding"))
         return tuple(out)
     if state.section is Section.JOINING:
+        selected = state.selected()
+        if isinstance(selected, JoinView) and selected.state == "PENDING" and selected.address:
+            return (("y", "admit at its address"), ("X", "reset to factory settings"))
         return (("a", "open joining for 15 min"),)
     return ()
 

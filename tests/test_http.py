@@ -234,6 +234,15 @@ class TestReading:
         assert hub.get("/issues")[1] == []
         assert hub.get("/commissioning")[1]["accepting"] is True
 
+    def test_admit_and_reset_are_routed_and_refuse_what_is_not_pending(self, hub: Hub) -> None:
+        """The joined relay is READY, not a stranger — both operations refuse it outright
+        instead of touching a working node."""
+        short_id = hub.get("/commissioning")[1]["known"][0]["short_id"]
+        for action in ("admit", "factory-reset"):
+            status, body = hub.call("POST", f"/commissioning/{short_id:08X}/{action}")
+            assert status == 400, body
+        assert hub.call("POST", "/commissioning/nothex/admit")[0] == 404
+
 
 class TestConfigurationEndpoint:
     """A write goes to the FILE and reaches the node by reconciling — never the other way

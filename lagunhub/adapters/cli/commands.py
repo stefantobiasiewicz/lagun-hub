@@ -65,6 +65,8 @@ class Hub(Protocol):
     def read(self, ref: str, endpoint: int, attribute: str) -> ActionView: ...
     def identify(self, ref: str, seconds: int = 5) -> ActionView: ...
     def accept_new(self, seconds: float = 900.0) -> CommissioningView: ...
+    def admit(self, short_id: int) -> CommissioningView: ...
+    def factory_reset(self, short_id: int) -> ActionView: ...
     def config(self) -> ConfigView: ...
     def config_set(self, path: str, value: Any, *, etag: str) -> ConfigView: ...
     def config_delete(self, path: str, *, etag: str) -> ConfigView: ...
@@ -169,6 +171,27 @@ def _accept(hub: Hub, args: Sequence[str]) -> Result:
     return Result("commissioning", view, f"joining open for {_human(seconds)}")
 
 
+def _admit(hub: Hub, args: Sequence[str]) -> Result:
+    short_id = _short_id(_arg(args, 0, "admit", "ShortId"))
+    view = hub.admit(short_id)
+    return Result("commissioning", view, f"0x{short_id:08X} admitted — enumerating")
+
+
+def _reset(hub: Hub, args: Sequence[str]) -> Result:
+    short_id = _short_id(_arg(args, 0, "reset", "ShortId"))
+    return Result(
+        "action", hub.factory_reset(short_id), f"0x{short_id:08X} reset — it goes back to joining"
+    )
+
+
+def _short_id(text: str) -> int:
+    """`0xAABBCCDD` or `AABBCCDD` — as the `joining` table prints it."""
+    try:
+        return int(text, 16)
+    except ValueError:
+        raise ApiError(Problem.INVALID, f"{text!r} is not a ShortId") from None
+
+
 def _commissioning(hub: Hub, args: Sequence[str]) -> Result:
     _no_args(args, "joining")
     return Result("commissioning", hub.commissioning())
@@ -211,6 +234,8 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("identify", _identify, "identify <node> [time]", "which box is it"),
     Command("accept", _accept, "accept [time]", "open joining for new nodes"),
     Command("joining", _commissioning, "joining", "who is announcing and what they got"),
+    Command("admit", _admit, "admit <ShortId>", "let in a PENDING node found at its address"),
+    Command("reset", _reset, "reset <ShortId>", "factory-reset a PENDING node back to joining"),
     Command("diff", _diff, "diff", "how the installation differs from the file"),
     Command("issues", _issues, "issues", "what needs the operator's decision"),
     Command("health", _health, "health", "latencies, counters, buses"),

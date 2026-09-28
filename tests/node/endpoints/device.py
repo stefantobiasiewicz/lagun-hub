@@ -63,7 +63,9 @@ class Device(SystemEndpoint):
             if args["magic"] != FACTORY_RESET_MAGIC:
                 return ResultCode.INVALID_VALUE, b""
             if self.node is not None:
-                self.node.factory_reset()
+                # Deferred like Reboot: the reply still travels from the old address.
+                # Erasing first would send it from 0x000, and the hub would hear nothing.
+                self.node.request_factory_reset()
             return ResultCode.OK, b""
         return ResultCode.UNSUPPORTED_ELEMENT, b""
 

@@ -24,6 +24,8 @@ from lagunhub.adapters.tui.state import Feed, Focus, Section, State
 from lagunhub.api import (
     AttributeView,
     BindingView,
+    CommissioningView,
+    JoinView,
     NodeSummary,
     TargetView,
     TrafficView,
@@ -701,3 +703,39 @@ def _run(state: State) -> None:
 
 def _index(state: State, name: str) -> int:
     return next(i for i, a in enumerate(state.detail_rows()) if a.name == name)
+
+
+class TestStrangers:
+    """A node found at an address the hub did not know — 06-cykl-zycia-urzadzenia.md §2.3."""
+
+    def joining(self, state: State, *rows: JoinView) -> State:
+        state.worker._on_done = lambda _: None
+        state.section = Section.JOINING
+        state.snapshot = replace(
+            state.snapshot, joining=CommissioningView(accepting=False, known=rows)
+        )
+        return state
+
+    def test_y_admits_a_pending_node_with_an_address(self, state: State) -> None:
+        self.joining(state, JoinView(0xAABBCCDD, "CONTROL", address=0x040, state="PENDING"))
+        app.key(state, ord("y"))
+        _run(state)
+        assert ("admit", (0xAABBCCDD,)) in _fake(state).calls
+
+    def test_x_resets_only_after_the_short_id_is_retyped(self, state: State) -> None:
+        self.joining(state, JoinView(0xAABBCCDD, "CONTROL", address=0x040, state="PENDING"))
+        app.key(state, ord("X"))
+        _run(state)
+        assert not any(call[0] == "factory_reset" for call in _fake(state).calls)
+        for letter in "AABBCCDD":
+            app.key(state, ord(letter))
+        app.key(state, 10)
+        _run(state)
+        assert ("factory_reset", (0xAABBCCDD,)) in _fake(state).calls
+
+    def test_a_node_waiting_to_join_is_not_admitted_this_way(self, state: State) -> None:
+        """Without an address the accepting mode is its road in, not `y`."""
+        self.joining(state, JoinView(0xAABBCCDD, "CONTROL", state="PENDING"))
+        app.key(state, ord("y"))
+        _run(state)
+        assert not any(call[0] == "admit" for call in _fake(state).calls)

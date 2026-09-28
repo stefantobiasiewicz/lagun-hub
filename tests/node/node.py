@@ -86,6 +86,7 @@ class NodeCore:
         self._last_report: dict[int, float] = {}
         self._reboot_at: float | None = None
         self._pending_address: int | None = None
+        self._factory_reset_pending = False
         self.faults = Faults()
         self._segments_pending = 0
         self.joining: Joining | None = None
@@ -212,6 +213,16 @@ class NodeCore:
             if self.joining.due(now):
                 self._announce(now)
             self.flush()
+            return
+        if self._factory_reset_pending:
+            # Erase, then start over: without an address the node goes back to joining
+            # (06-cykl-zycia-urzadzenia.md §7).
+            self._factory_reset_pending = False
+            self.factory_reset()
+            bus = self.bus
+            self.stop()
+            if bus is not None:
+                self.start(bus, reset_reason=dev.ResetReason.SOFTWARE)
             return
         if self._reboot_at is not None and now >= self._reboot_at:
             self._reboot_at = None
@@ -439,6 +450,9 @@ class NodeCore:
 
     def request_reboot(self, delay: float) -> None:
         self._reboot_at = self.clock() + delay
+
+    def request_factory_reset(self) -> None:
+        self._factory_reset_pending = True
 
     def request_address_change(self, address: int) -> None:
         """A deferred address change — **and the deferring is where it ends**.

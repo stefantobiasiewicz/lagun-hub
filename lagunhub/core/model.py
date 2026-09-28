@@ -106,6 +106,17 @@ class AddressPool:
 
     def __init__(self) -> None:
         self._taken: set[int] = set()
+        self._heard: set[int] = set()
+        """Addresses a node has spoken from since the hub started
+        ([`03-adresacja.md`](../lagunbus-spec/03-adresacja.md) §6).
+
+        A separate set, not `_taken`, because it answers a different question: `_taken`
+        is what the database says, `_heard` is what the bus says — and the two part ways
+        exactly when it matters: a database restored from a backup older than some node's
+        joining, or a retired node that never got its `FactoryReset`. Kept in memory only:
+        after a restart every working node is heard again within one reporting period,
+        and an address of a node removed for good stays blocked until then — out of two
+        thousand, no cost at all."""
 
     def reserve(self, address: int) -> None:
         if address:
@@ -114,14 +125,22 @@ class AddressPool:
     def release(self, address: int) -> None:
         self._taken.discard(address)
 
+    def hear(self, address: int) -> None:
+        self._heard.add(address)
+
+    def unhear(self, address: int) -> None:
+        self._heard.discard(address)
+
     def taken(self, address: int) -> bool:
-        return address in self._taken
+        return address in self._taken or address in self._heard
 
     def allocate(self, node_class: NodeClass) -> int | None:
-        """The first free one from the block the class points at. `None` when it is full."""
+        """The first free one from the block the class points at. `None` when it is full.
+
+        Free means neither in the database nor heard on the bus."""
         lo, hi = NODE_CLASS_BLOCKS[node_class]
         for address in range(lo, hi + 1):
-            if address not in self._taken:
+            if not self.taken(address):
                 self._taken.add(address)
                 return address
         return None
@@ -272,12 +291,27 @@ class Installation:
                 return record
         return None
 
+    def holder(self, address: int) -> JoinRecord | Uid | None:
+        """Whoever holds this address in the hub's database, on **any** bus — or `None`
+        when the address is a stranger's (06-cykl-zycia-urzadzenia.md §2.3).
+
+        The bus is deliberately ignored: an address known on another bus is not a
+        stranger but a conflict, and `foreign_record_at` handles that. A retired record
+        holds nothing — its address went back to the pool.
+        """
+        uid = self.by_address.get(address)
+        if uid is not None:
+            return uid
+        for record in self.records.values():
+            if record.address == address and record.state != NodeState.RETIRED:
+                return record
+        return None
+
     def foreign_record_at(self, bus: int, address: int) -> JoinRecord | None:
         """The record holding this address on **another** bus — that is, a conflict
         (03-adresacja.md §6).
 
-        Nodes on separate buses never hear each other, so the self-yielding of §6 will
-        not save them: only the hub sees this case.
+        Nodes on separate buses never hear each other, so only the hub sees this case.
         """
         for record in self.records.values():
             if record.address == address and record.bus != bus and record.short_id:

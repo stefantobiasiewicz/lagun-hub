@@ -131,6 +131,14 @@ class HubClient:
             CommissioningView, self._call("POST", "/commissioning/accept", {"seconds": seconds})
         )
 
+    def admit(self, short_id: int) -> CommissioningView:
+        return _build(CommissioningView, self._call("POST", f"/commissioning/{short_id:08X}/admit"))
+
+    def factory_reset(self, short_id: int) -> ActionView:
+        return _build(
+            ActionView, self._call("POST", f"/commissioning/{short_id:08X}/factory-reset")
+        )
+
     # --- configuration -----------------------------------------------------------
 
     def config(self) -> ConfigView:

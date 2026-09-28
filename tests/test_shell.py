@@ -254,6 +254,14 @@ class FakeHub:
         self._record("accept_new", seconds)
         return CommissioningView(accepting=True)
 
+    def admit(self, short_id: int) -> CommissioningView:
+        self._record("admit", short_id)
+        return CommissioningView(accepting=False)
+
+    def factory_reset(self, short_id: int) -> ActionView:
+        self._record("factory_reset", short_id)
+        return ActionView(ok=True, result="OK", attempts=1, elapsed=0.003)
+
     def config(self) -> ConfigView:
         return ConfigView(etag=self.etag, files=("hub.yaml",), document={})
 
@@ -306,6 +314,19 @@ def test_hubapi_and_hubclient_satisfy_the_same_protocol() -> None:
 
 
 class TestCommands:
+    def test_admit_and_reset_take_the_short_id_as_joining_prints_it(self, hub: FakeHub) -> None:
+        """`joining` prints `0xAABBCCDD`; a person copies that — and it is to work, with or
+        without the prefix."""
+        commands.run(hub, "admit 0xAABBCCDD")
+        commands.run(hub, "reset aabbccdd")
+        assert ("admit", (0xAABBCCDD,)) in hub.calls
+        assert ("factory_reset", (0xAABBCCDD,)) in hub.calls
+
+    def test_a_short_id_that_is_not_hex_is_refused(self, hub: FakeHub) -> None:
+        with pytest.raises(ApiError) as caught:
+            commands.run(hub, "admit kitchen")
+        assert caught.value.problem == Problem.INVALID
+
     def test_cmd_goes_straight_to_the_node(self, hub: FakeHub) -> None:
         result = commands.run(hub, "cmd kitchen-relay ep4 Toggle")
         assert result.kind == "action"

@@ -70,7 +70,9 @@ from lagunhub.core.model import (
     EndpointModel,
     EndpointWanted,
     Installation,
+    JoinRecord,
     NodeModel,
+    NodeState,
     Uid,
 )
 from lagunhub.core.traffic import Traffic
@@ -224,6 +226,62 @@ class HubApi:
             return self._commissioning(inst)
 
         return self._ask(open_bus)
+
+    def admit(self, short_id: int) -> CommissioningView:
+        """Let in a node found under an address the hub did not know
+        (06-cykl-zycia-urzadzenia.md §2.3). It keeps that address and goes through
+        enumeration like any newly joined node."""
+
+        def admit_it(inst: Installation) -> CommissioningView:
+            record = self._stranger(inst, short_id)
+            record.state = NodeState.JOINED
+            self.core.enumeration.start(record)
+            self.core.touch()
+            return self._commissioning(inst)
+
+        return self._ask(admit_it)
+
+    def factory_reset(self, short_id: int) -> ActionView:
+        """Send a node found under an unknown address back to joining
+        (06-cykl-zycia-urzadzenia.md §2.3).
+
+        The node forgets its address and announces itself like a new one, so it lands
+        with the accepting mode like any unknown device. The hub gives up its record of
+        the address only once the node **acknowledged** the reset — a node that did not
+        answer still sits there.
+        """
+        future: Future[Outcome] = Future()
+
+        def task() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                record = self._stranger(self.core.installation, short_id)
+            except BaseException as exc:
+                future.set_exception(exc)
+                return
+            address = record.address
+
+            def done(outcome: Outcome) -> None:
+                if outcome.ok and record.address == address:
+                    self.core.installation.addresses.release(address)
+                    self.core.strangers.forget(address)
+                    record.address = 0
+                    self.core.touch()
+                future.set_result(outcome)
+
+            self.core.transact(
+                record.bus,
+                address,
+                0,
+                dev.FACTORY_RESET,
+                MessageKind.COMMAND,
+                encode("u32", dev.FACTORY_RESET_MAGIC),
+                done,
+            )
+
+        self.core.submit(task)
+        return _outcome(self._collect(future))
 
     def command(
         self, ref: str, endpoint: int, name: str, args: Mapping[str, Any] | None = None
@@ -674,7 +732,9 @@ class HubApi:
                 "published": core.published,
                 "dropped_sends": core.dropped_sends,
                 "unmatched_responses": core.unmatched_responses,
-                "unknown_booted": core.unknown_booted,
+                "strangers_probed": core.strangers.probed,
+                "strangers_pending": core.strangers.pending,
+                "strangers_failed": core.strangers.failed,
             },
             transactions={
                 "opened": tx.opened,
@@ -770,6 +830,24 @@ class HubApi:
             if node.name == sought:
                 return uid
         raise ApiError(Problem.NOT_FOUND, f"there is no node {ref!r}")
+
+    def _stranger(self, inst: Installation, short_id: int) -> JoinRecord:
+        """A pending node **with an address** — one found by `Strangers`. A pending node
+        without one is waiting to join, and the accepting mode is its road in."""
+        record = inst.records.get(short_id)
+        if record is None:
+            raise ApiError(Problem.NOT_FOUND, f"the hub has never seen ShortId 0x{short_id:08X}")
+        if record.state != NodeState.PENDING:
+            raise ApiError(
+                Problem.INVALID, f"ShortId 0x{short_id:08X} is {record.state.name}, not PENDING"
+            )
+        if not record.address:
+            raise ApiError(
+                Problem.INVALID,
+                f"ShortId 0x{short_id:08X} has no address — it is waiting to join; "
+                f"open the accepting mode instead",
+            )
+        return record
 
     def _present(self, inst: Installation, ref: str) -> NodeModel:
         """A node one can talk to. Configured but absent — one cannot."""

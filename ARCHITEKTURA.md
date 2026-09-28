@@ -494,6 +494,42 @@ Pula adresów trzyma trzy bloki (`CONTROL` `0x001`–`0x0FF`, `SENSOR` `0x100`�
 rezerwa `0x400`–`0x7FD`) i zna stan `RETIRED`, żeby nie przydzielić adresu, spod którego
 może się jeszcze odezwać usunięty węzeł.
 
+### 8.3 A node at an address the hub does not know
+
+A node with an address never announces itself, so joining will not bring it in when the
+hub's database lacks it — a lost or old database, a retired node the `FactoryReset` did
+not reach, a module used elsewhere ([`06`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md)
+§2.3). `core/strangers.py` handles it:
+
+```
+any frame FROM a node (report, event, alarm, reply, query)
+   │
+   ├─ address → AddressPool.hear()          heard = taken, whatever the database says
+   │
+   └─ nobody holds it in the database?
+         read Device.Uid, then Device.ShortId      once per address, 60 s pause on silence
+            Uid known       → issue: database and bus disagree
+            ShortId known   → issue: the same, seen from the other key
+            otherwise       → JoinRecord PENDING with that address
+                                 admit          → JOINED, enumeration, READY
+                                 factory_reset  → the node forgets the address and joins anew
+```
+
+**Every frame is the trigger, not `Booted`**: the hub on a Raspberry Pi comes up minutes
+after the nodes, and their `Booted` is gone by then. The mandatory `Diagnostics` reports
+bring every stranger within five minutes, without polling (07-hub.md §5.1).
+
+**A pending node with an address is never admitted by itself**, not even with the
+accepting mode open — the mode is for nodes that announce, i.e. nodes without one.
+
+**Heard addresses live in memory only.** After a restart every working node is heard again
+within one reporting period; an address of a node gone for good stays blocked until the
+next restart, which out of two thousand costs nothing.
+
+Two nodes under one address on **one** cable stay invisible — an accepted risk, prevented
+by the rule that a used module is reset to factory settings before it is plugged in
+(`lagunbus-spec/DECYZJE.md`, "Konflikt adresów: zapobieganie zamiast wykrywania").
+
 ### 8.2 Dlaczego model ma dwie tablice
 
 Między przydziałem adresu a enumeracją hub jest w stanie, który łatwo przeoczyć przy
@@ -813,6 +849,8 @@ GET  /bindings                               powiązania z pliku, z rozwiązanym
 GET  /issues                                 rozjazdy konfiguracji, konflikty adresów
 GET  /health                                 histogram opóźnień, liczniki, stan magistral
 POST /commissioning/accept                   tryb przyjmowania, wygasa po 15 min
+POST /commissioning/{ShortId}/admit         przyjmij węzeł PENDING spod jego adresu (§8.3)
+POST /commissioning/{ShortId}/factory-reset reset fabryczny węzła PENDING (§8.3)
 GET  /events                                 SSE — zdarzenia i zmiany stanu na żywo
 ```
 
@@ -965,6 +1003,7 @@ hub/                         ← repozytorium
 │   │   ├── transactions.py  TidAllocator, TransactionManager
 │   │   ├── segments.py      kodek segmentów i reasembler
 │   │   ├── commissioning.py ZGŁOSZENIE/PRZYDZIAŁ, tryb przyjmowania
+│   │   ├── strangers.py     node at an unknown address → PENDING (§8.3)
 │   │   ├── enumeration.py   odczyt tożsamości i deskryptora
 │   │   ├── reconcile.py     uzgadnianie konfiguracji z węzłami
 │   │   ├── events.py        strumień zdarzeń dla adapterów
@@ -1139,8 +1178,7 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
   `Uptime` niższy niż poprzednio to restart, którego hub nie zauważył,
 - dziennik zdarzeń i rozjazdów — **do decyzji operatora, nie do zgadywania**
   ([`07-hub.md`](../lagunbus-spec/07-hub.md) §5.3),
-- usunięcie węzła, `FactoryReset`, stan `RETIRED`; kopia katalogu konfiguracji,
-- dwa węzły pod jednym adresem na **jednym** kablu — `zadania/BUG-01.md`.
+- usunięcie węzła, `FactoryReset`, stan `RETIRED`; kopia katalogu konfiguracji.
 
 ---
 

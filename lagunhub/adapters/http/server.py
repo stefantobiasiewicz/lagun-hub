@@ -218,6 +218,16 @@ def routes(api: HubApi) -> list[Route]:
             re.compile(r"^/commissioning/accept$"),
             lambda r: Response(body=api.accept_new(float(r.field("seconds", 900)))),
         ),
+        (
+            "POST",
+            re.compile(r"^/commissioning/([0-9A-Fa-fx]+)/admit$"),
+            lambda r: Response(body=api.admit(_short_id(r.args[0]))),
+        ),
+        (
+            "POST",
+            re.compile(r"^/commissioning/([0-9A-Fa-fx]+)/factory-reset$"),
+            lambda r: Response(body=api.factory_reset(_short_id(r.args[0]))),
+        ),
     ]
 
 
@@ -509,3 +519,11 @@ def free_port() -> int:
 
 
 __all__ = ["HEARTBEAT", "HubServer", "Request", "Response", "free_port", "routes"]
+
+
+def _short_id(text: str) -> int:
+    """A `ShortId` in a path — hexadecimal, as the commissioning view prints it."""
+    try:
+        return int(text, 16)
+    except ValueError:
+        raise ApiError(Problem.INVALID, f"{text!r} is not a ShortId") from None

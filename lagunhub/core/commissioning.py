@@ -120,6 +120,10 @@ class Commissioning:
         self._assign(bus, record, address)
 
     def _assign(self, bus: int, record: JoinRecord, address: int) -> None:
+        if record.address and record.address != address:
+            # A pending node that came back without its address — reset by hand, say —
+            # no longer holds the old one.
+            self.installation.addresses.release(record.address)
         record.address = address
         record.state = NodeState.JOINED
         self.installation.addresses.reserve(address)
@@ -138,10 +142,9 @@ class Commissioning:
     def on_booted(self, bus: int, address: int) -> None:
         """The same address on two buses is a conflict (03-adresacja.md §6).
 
-        Only the hub can detect it: nodes on separate buses never hear each other, so
-        the self-yielding of §6 will not save them. The hub cannot settle it — it does
-        not know which node is the right one — so it reports an issue needing human
-        attention (07-hub.md §5.3).
+        Only the hub can detect it: nodes on separate buses never hear each other. The
+        hub cannot settle it — it does not know which node is the right one — so it
+        reports an issue needing human attention (07-hub.md §5.3).
 
         **We recognise it by the interface, not by `ShortId`.** §6 spoke of "two
         `Booted` announcements with different `ShortId`s", but `Booted` carries only

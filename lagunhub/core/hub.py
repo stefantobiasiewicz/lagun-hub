@@ -26,6 +26,7 @@ from lagunhub.core.model import (
     Installation,
     JoinRecord,
     NodeModel,
+    NodeState,
     Snapshot,
     Source,
     Target,
@@ -36,6 +37,7 @@ from lagunhub.core.rx import ColdItem, Received, Sent, Task
 from lagunhub.core.schedule import Schedule
 from lagunhub.core.segments import SegmentReassembler
 from lagunhub.core.store import StoreThread
+from lagunhub.core.strangers import Strangers
 from lagunhub.core.traffic import Traffic, TrafficBus
 from lagunhub.core.transactions import Outcome, TransactionManager
 from lagunhub.protocol.bus.base import Bus, TransmitQueueFull
@@ -44,6 +46,19 @@ from lagunhub.protocol.frame import Frame, decode_header
 from lagunhub.protocol.registry import TRANSACTIONAL, MessageKind
 
 Publish = Callable[[Snapshot], None]
+
+FROM_NODE = frozenset(
+    {
+        MessageKind.ALARM,
+        MessageKind.EVENT,
+        MessageKind.RESPONSE,
+        MessageKind.REPORT,
+        MessageKind.LONG_RESPONSE,
+        MessageKind.QUERY,
+    }
+)
+"""Kinds in which `ADDRESS` is the **sender** (05-mapowanie-can.md §2) — the ones that say
+somebody is sitting at that address."""
 
 WATCH = 1.0
 """How often to check whether somebody edited the configuration files by hand.
@@ -96,6 +111,13 @@ class CoreThread(threading.Thread):
             installation, self._send, self.schedule, clock, on_assigned=self._on_assigned
         )
         self.reconcile = Reconciler(installation, self._transact)
+        self.strangers = Strangers(
+            installation,
+            self._read,
+            clock,
+            on_pending=self._on_pending,
+            on_uid_conflict=self._on_uid_conflict,
+        )
         self.events = EventBus()
         """What is happening in the installation. Adapters read it; the model stays with
         CORE."""
@@ -108,7 +130,6 @@ class CoreThread(threading.Thread):
         """The moment of start-up. The watch shows time **from it**, not from when the
         machine was switched on — `61.204` reads, `409712.969` does not."""
 
-        self.unknown_booted = 0
         self.config_reloads = 0
         self.config_rejections = 0
         self.uid_conflicts: list[tuple[int, Uid, int]] = []
@@ -406,6 +427,11 @@ class CoreThread(threading.Thread):
             return
         fields = frame.fields
         now = self.clock()
+        if fields.kind in FROM_NODE:
+            # Before the kind is dispatched: a report, an event and a reply are all
+            # equally proof that somebody sits at this address
+            # (06-cykl-zycia-urzadzenia.md §2.3).
+            self.strangers.heard(item.bus, fields.address)
 
         if fields.kind == MessageKind.REPORT:
             changed = self.installation.on_report(
@@ -541,6 +567,21 @@ class CoreThread(threading.Thread):
         )
         self.touch()
 
+    def _on_pending(self, record: JoinRecord) -> None:
+        """A node under an unknown address has been identified and waits for a person."""
+        self.events.publish(
+            Event(
+                kind=EventKind.NODE,
+                at=self.clock(),
+                name=record.state.name,
+                text=(
+                    f"ShortId 0x{record.short_id:08X} works at 0x{record.address:03X}, "
+                    f"which the hub does not know — admit it or reset it to factory settings"
+                ),
+            )
+        )
+        self.touch()
+
     def _on_enumerated(self, node: NodeModel) -> None:
         self._announce_node(node.uid, node.state.name)
         self.touch()  # a node arrived, so bindings may have a new target
@@ -560,11 +601,11 @@ class CoreThread(threading.Thread):
         firmware = int.from_bytes(data[2:6], "little")
         self.commissioning.on_booted(bus, address)
         record = self.installation.record_at(bus, address)
-        if record is None:
-            # The node has an address but the hub does not know it — after restoring
-            # the database from an incomplete backup, say. Needs the operator's
-            # attention (07-hub.md §5.3); handling arrives with maintenance (ARCHITEKTURA.md §14.4).
-            self.unknown_booted += 1
+        if record is None or record.state == NodeState.PENDING:
+            # An address the hub does not know is `Strangers`' business, and it has
+            # already seen this frame (06-cykl-zycia-urzadzenia.md §2.3). A pending node
+            # waits for the operator — enumerating it here would let it in by the back
+            # door.
             return
         if record.uid is None:
             self.enumeration.start(record)
@@ -615,6 +656,20 @@ class CoreThread(threading.Thread):
         node = self.installation.nodes.get(uid) if uid is not None else None
         bus = node.bus if node is not None else 0
         self._transact(bus, uid_or_address, endpoint, element, kind, args, on_done)
+
+    def transact(
+        self,
+        bus: int,
+        address: int,
+        endpoint: int,
+        element: int,
+        kind: MessageKind,
+        args: bytes,
+        on_done: Callable[[Outcome], None] | None = None,
+    ) -> None:
+        """Like `request`, but on a bus the caller names — for a node the model does not
+        hold yet, such as a pending one, whose bus only its join record knows."""
+        self._transact(bus, address, endpoint, element, kind, args, on_done)
 
     # --- for adapters and later stages ----------------------------------------
 

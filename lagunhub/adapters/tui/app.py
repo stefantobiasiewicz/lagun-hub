@@ -22,7 +22,7 @@ from typing import Any, Final
 from lagunhub.adapters.cli.commands import Hub
 from lagunhub.adapters.tui import actions, overlay, screen
 from lagunhub.adapters.tui.state import Section, State
-from lagunhub.api import ApiError, AttributeView, DiffRow, EndpointView, NodeSummary
+from lagunhub.api import ApiError, AttributeView, DiffRow, EndpointView, JoinView, NodeSummary
 
 TICK_MS: Final = 100
 """How long to wait for a key before redrawing. Ten frames per second is enough for the
@@ -44,6 +44,7 @@ HELP: Final[tuple[str, ...]] = (
     "               u remove from the file  g read from the node",
     "               p adopt the value from the node INTO THE FILE",
     "bindings:      + add     - remove",
+    "joining:       a open    y admit a PENDING node   X reset it to factory",
     "",
     "e goes to the FILE, and reaches the node by reconciling.",
     "w goes STRAIGHT to the node and does not touch the file.",
@@ -196,6 +197,62 @@ def _accept(state: State) -> None:
         return "joining open for 15 min" if view.accepting else "joining closed"
 
     state.worker.submit(task)
+
+
+def _stranger(state: State) -> JoinView | None:
+    """The joining row under the cursor, if it is a node found at an address the hub did
+    not know (06-cykl-zycia-urzadzenia.md §2.3) — the only kind these two keys act on."""
+    selected = state.selected()
+    if (
+        state.section is not Section.JOINING
+        or not isinstance(selected, JoinView)
+        or selected.state != "PENDING"
+        or not selected.address
+    ):
+        return None
+    return selected
+
+
+def _admit(state: State) -> None:
+    row = _stranger(state)
+    if row is None:
+        state.say("! choose a PENDING node that has an address")
+        return
+
+    def task() -> str:
+        state.hub.admit(row.short_id)
+        state.reload()
+        return f"0x{row.short_id:08X} admitted at 0x{row.address:03X} — enumerating"
+
+    state.worker.submit(task)
+
+
+def _factory_reset(state: State) -> None:
+    """Irreversible for the node — so confirmed by retyping, like removing a binding."""
+    row = _stranger(state)
+    if row is None:
+        state.say("! choose a PENDING node that has an address")
+        return
+    name = f"{row.short_id:08X}"
+
+    def carry_out(_: str) -> None:
+        def task() -> str:
+            result = state.hub.factory_reset(row.short_id)
+            state.reload()
+            return f"0x{name}: FactoryReset {result.result} — it goes back to joining"
+
+        state.worker.submit(task)
+
+    state.overlay = overlay.Confirm(
+        title="Reset to factory settings?",
+        lines_before=(
+            f"The node at 0x{row.address:03X} forgets its address and everything a person",
+            "set on it, then announces itself like a new device.",
+        ),
+        expect=name,
+        prompt="type the ShortId to confirm:",
+        on_accept=carry_out,
+    )
 
 
 def _reconcile(state: State) -> None:
@@ -433,6 +490,8 @@ _LETTERS: Final[dict[int, Callable[[State], None]]] = {
     ord("f"): lambda s: _toggle(s, "Off"),
     ord("i"): _identify,
     ord("a"): _accept,
+    ord("y"): _admit,
+    ord("X"): _factory_reset,
     ord("R"): _reconcile,
     ord("e"): _edit,
     ord("w"): _set_on_node,
