@@ -16,7 +16,6 @@ from typing import ClassVar
 from lagunhub.protocol.endpoints.definition import TypeDef
 from lagunhub.protocol.endpoints.key_input import (
     CLICK,
-    DEBOUNCE_TIME,
     DOWN,
     EVENT_MODE,
     HOLD_ENABLED,
@@ -25,12 +24,14 @@ from lagunhub.protocol.endpoints.key_input import (
     HOLD_THRESHOLD,
     HOLD_TICK,
     HOLD_TICK_INTERVAL,
+    HOLD_TICK_LIMIT_S,
     KEY_INPUT,
     MAX_CLICKS,
     MULTI_CLICK_WINDOW,
     PRESS_COUNT,
     UP,
     EventMode,
+    Feature,
 )
 from lagunhub.protocol.values import Value, encode
 from tests.node.endpoints.base import FunctionalEndpoint
@@ -44,7 +45,16 @@ class _State(Enum):
     COUNTING = auto()  # waiting to see whether another press arrives (MULTICLICK)
 
 
+DEBOUNCE_S = 0.015
+"""The double's own contact bounce. Not an attribute: bounce belongs to how a device is
+built, and the type leaves it to the device (types/0x0010-key-input.md §5.7)."""
+
+
 class KeyInput(FunctionalEndpoint):
+    """A key. What it can do comes from ``features``; which timings the hub may tune
+    comes from ``optional`` — the rest are the double's own, at the type's
+    recommended values (types/0x0010-key-input.md §2.4)."""
+
     TYPE: ClassVar[TypeDef] = KEY_INPUT
 
     def __post_init__(self) -> None:
@@ -56,13 +66,22 @@ class KeyInput(FunctionalEndpoint):
         self._clicks = 0
         self._deadline = 0.0
 
+    def _setting(self, attribute: int) -> int:
+        """The attribute when the device exposes it, its own value when not."""
+        default = KEY_INPUT.attributes[attribute].default
+        assert isinstance(default, int), "every KeyInput timing has a numeric default"
+        return self.opt(attribute, default)
+
     def _ms(self, attribute: int) -> float:
-        return self.num(attribute) / 1000.0
+        return self._setting(attribute) / 1000.0
+
+    def _hold(self) -> bool:
+        return self.has(Feature.HOLD) and bool(self.values[HOLD_ENABLED])
 
     # --- the physical input -------------------------------------------------
 
     def press(self, now: float) -> None:
-        """The contact is closed. The event comes about only after ``DebounceTime``."""
+        """The contact is closed. The event comes about only after the bounce."""
         if self._state in (_State.RELEASED, _State.COUNTING):
             self._state = _State.BOUNCING
             self._changed_at = now
@@ -85,7 +104,7 @@ class KeyInput(FunctionalEndpoint):
             self._state = _State.RELEASED
         elif mode == EventMode.MULTICLICK:
             self._clicks += 1
-            if self._clicks >= self.num(MAX_CLICKS):
+            if self._clicks >= self._setting(MAX_CLICKS):
                 self._flush_clicks()
             else:
                 self._state = _State.COUNTING
@@ -105,7 +124,7 @@ class KeyInput(FunctionalEndpoint):
     # --- the clock ----------------------------------------------------------
 
     def tick(self, now: float) -> None:
-        if self._state == _State.BOUNCING and now - self._changed_at >= self._ms(DEBOUNCE_TIME):
+        if self._state == _State.BOUNCING and now - self._changed_at >= DEBOUNCE_S:
             self._state = _State.PRESSED
             self._pressed_at = now
             self.values[PRESS_COUNT] = self.num(PRESS_COUNT) + 1
@@ -113,7 +132,7 @@ class KeyInput(FunctionalEndpoint):
                 self.emit(DOWN)
             return
 
-        if self._state == _State.PRESSED and self.values[HOLD_ENABLED]:
+        if self._state == _State.PRESSED and self._hold():
             if now - self._pressed_at >= self._ms(HOLD_THRESHOLD):
                 # A press longer than the threshold turns into a hold and gives
                 # NO Click at all (§5.3).
@@ -123,7 +142,13 @@ class KeyInput(FunctionalEndpoint):
                 self._next_tick = now + self._ms(HOLD_TICK_INTERVAL)
             return
 
-        if self._state == _State.HELD and now >= self._next_tick:
+        if (
+            self._state == _State.HELD
+            and now >= self._next_tick
+            and now - self._pressed_at < HOLD_TICK_LIMIT_S
+        ):
+            # Past the limit the key is taken to be stuck, and it may not keep the bus
+            # busy; HoldEnd still comes on release (§5.6).
             self.emit(HOLD_TICK, self._elapsed(now))
             self._next_tick += self._ms(HOLD_TICK_INTERVAL)
             return

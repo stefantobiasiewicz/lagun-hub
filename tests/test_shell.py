@@ -145,7 +145,7 @@ EP4_KEY = EndpointView(
     channel=1,
     name="Left key",
     attributes=(
-        AttributeView(id=0x10, name="DebounceTime", type="u16", access="RW", configurable=True),
+        AttributeView(id=0x15, name="HoldThreshold", type="u16", access="RW", configurable=True),
     ),
     events=("Down", "Up", "Click", "HoldStart"),
 )

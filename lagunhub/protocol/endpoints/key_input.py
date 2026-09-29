@@ -3,6 +3,13 @@
 It has no state and takes no commands: it reports facts and nothing else. `Click`
 happens **on release**, because one cannot call a click something that is still
 going on.
+
+The core is `Click(1)` alone, with no mandatory attribute: a doorbell declares no
+features at all. Multi-click, hold and the RAW mode are features, and the timings are
+optional even within their feature — a device that does not expose one uses its own,
+fixed and within the type's range (types/0x0010-key-input.md §1 and §2.4). Contact
+bounce and input polarity are not attributes at all: they belong to how the device is
+built, not to the hub (zadania/CR-01.md, N1a and N5).
 """
 
 from __future__ import annotations
@@ -16,14 +23,12 @@ from lagunhub.protocol.endpoints.definition import TypeDef
 from lagunhub.protocol.registry import EndpointType
 
 PRESS_COUNT: Final = 0x00
-DEBOUNCE_TIME: Final = 0x10
 EVENT_MODE: Final = 0x11
 MULTI_CLICK_WINDOW: Final = 0x12
 MAX_CLICKS: Final = 0x13
 HOLD_ENABLED: Final = 0x14
 HOLD_THRESHOLD: Final = 0x15
 HOLD_TICK_INTERVAL: Final = 0x16
-INVERT: Final = 0x17
 
 DOWN: Final = 0x01
 UP: Final = 0x02
@@ -33,22 +38,38 @@ HOLD_TICK: Final = 0x06
 HOLD_END: Final = 0x07
 
 
+class Feature:
+    MULTICLICK = 1 << 0
+    HOLD = 1 << 1
+    RAW = 1 << 2
+
+
 class EventMode:
     CLICK = 0
     MULTICLICK = 1
     RAW = 2
 
 
+HOLD_TICK_LIMIT_S: Final = 60.0
+"""A key held this long stops sending HoldTick (types/0x0010-key-input.md §5.6)."""
+
 KEY_INPUT: Final = TypeDef(
     type_id=EndpointType.KeyInput,
     revision=1,
     attributes={
         PRESS_COUNT: A(PRESS_COUNT, "PressCount", "u32", "RO", persist=True, optional=True),
-        DEBOUNCE_TIME: A(
-            DEBOUNCE_TIME, "DebounceTime", "u16", "RW", persist=True, default=15, lo=5, hi=100
-        ),
         EVENT_MODE: A(
-            EVENT_MODE, "EventMode", "enum8", "RW", persist=True, default=EventMode.CLICK
+            EVENT_MODE,
+            "EventMode",
+            "enum8",
+            "RW",
+            persist=True,
+            default=EventMode.CLICK,
+            feature=Feature.MULTICLICK | Feature.RAW,
+            value_features=(
+                (EventMode.MULTICLICK, Feature.MULTICLICK),
+                (EventMode.RAW, Feature.RAW),
+            ),
         ),
         MULTI_CLICK_WINDOW: A(
             MULTI_CLICK_WINDOW,
@@ -59,11 +80,41 @@ KEY_INPUT: Final = TypeDef(
             default=350,
             lo=150,
             hi=800,
+            feature=Feature.MULTICLICK,
+            optional=True,
         ),
-        MAX_CLICKS: A(MAX_CLICKS, "MaxClicks", "u8", "RW", persist=True, default=3, lo=2, hi=5),
-        HOLD_ENABLED: A(HOLD_ENABLED, "HoldEnabled", "bool", "RW", persist=True, default=True),
+        MAX_CLICKS: A(
+            MAX_CLICKS,
+            "MaxClicks",
+            "u8",
+            "RW",
+            persist=True,
+            default=3,
+            lo=2,
+            hi=5,
+            feature=Feature.MULTICLICK,
+            optional=True,
+        ),
+        HOLD_ENABLED: A(
+            HOLD_ENABLED,
+            "HoldEnabled",
+            "bool",
+            "RW",
+            persist=True,
+            default=True,
+            feature=Feature.HOLD,
+        ),
         HOLD_THRESHOLD: A(
-            HOLD_THRESHOLD, "HoldThreshold", "u16", "RW", persist=True, default=500, lo=200, hi=3000
+            HOLD_THRESHOLD,
+            "HoldThreshold",
+            "u16",
+            "RW",
+            persist=True,
+            default=500,
+            lo=200,
+            hi=3000,
+            feature=Feature.HOLD,
+            optional=True,
         ),
         HOLD_TICK_INTERVAL: A(
             HOLD_TICK_INTERVAL,
@@ -74,8 +125,9 @@ KEY_INPUT: Final = TypeDef(
             default=200,
             lo=50,
             hi=1000,
+            feature=Feature.HOLD,
+            optional=True,
         ),
-        INVERT: A(INVERT, "Invert", "bool", "RW", persist=True, default=False, optional=True),
     },
     events={
         DOWN: E(DOWN, "Down"),

@@ -4,9 +4,9 @@ The descriptor is taken from
 [`01-model-danych.md`](../../../lagunbus-spec/01-model-danych.md) §7 — the same example the
 specification uses to explain what `Channel` and `Purpose` are for.
 
-    ep4   KeyInput                             ch1   top key
-    ep5   KeyInput                             ch2   middle key
-    ep6   KeyInput                             ch3   bottom key
+    ep4   KeyInput [MULTICLICK|HOLD|RAW]       ch1   top key
+    ep5   KeyInput [MULTICLICK|HOLD|RAW]       ch2   middle key
+    ep6   KeyInput [MULTICLICK|HOLD|RAW]       ch3   bottom key
     ep7   Output [LEVEL|COLOR_RGB] INDICATOR   ch0   the whole panel's backlighting
     ep8   Sense  quantity = TEMPERATURE        ch0   thermometer
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from lagunhub.protocol.endpoints.key_input import PRESS_COUNT
+from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.endpoints.output import PURPOSE, Feature, Purpose
 from lagunhub.protocol.quantities import Quantity
 from lagunhub.protocol.registry import NodeClass
@@ -27,6 +27,19 @@ from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
 from tests.node.endpoints.sense import Sense
 from tests.node.node import NodeCore
+
+_KEY = ki.Feature.MULTICLICK | ki.Feature.HOLD | ki.Feature.RAW
+"""The universal panel from types/0x0010-key-input.md §6: the hub switches mode and hold
+per key without a change of device."""
+
+_TUNING = (
+    ki.PRESS_COUNT,
+    ki.MULTI_CLICK_WINDOW,
+    ki.MAX_CLICKS,
+    ki.HOLD_THRESHOLD,
+    ki.HOLD_TICK_INTERVAL,
+)
+"""Every timing tunable from the hub — the opposite end from `key1`."""
 
 DEVICE_TYPE = 0x01F1
 
@@ -44,9 +57,9 @@ def panel3(
         device_type=DEVICE_TYPE,
         node_class=NodeClass.CONTROL,
         functional={
-            4: KeyInput(channel=1, optional=(PRESS_COUNT,)),
-            5: KeyInput(channel=2, optional=(PRESS_COUNT,)),
-            6: KeyInput(channel=3, optional=(PRESS_COUNT,)),
+            4: KeyInput(channel=1, features=_KEY, optional=_TUNING),
+            5: KeyInput(channel=2, features=_KEY, optional=_TUNING),
+            6: KeyInput(channel=3, features=_KEY, optional=_TUNING),
             7: Output(
                 channel=0,
                 features=Feature.LEVEL | Feature.COLOR_RGB,

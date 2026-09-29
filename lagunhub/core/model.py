@@ -19,7 +19,7 @@ from enum import Enum, auto
 from typing import NewType, Protocol
 
 from lagunhub.protocol.endpoints import CATALOG
-from lagunhub.protocol.endpoints.definition import TypeDef
+from lagunhub.protocol.endpoints.definition import AttributeDef, TypeDef
 from lagunhub.protocol.frame import encode_header, encode_id
 from lagunhub.protocol.registry import NODE_CLASS_BLOCKS, EndpointType, MessageKind, NodeClass
 from lagunhub.protocol.values import Value, decode
@@ -174,10 +174,39 @@ class EndpointModel:
     features: int = 0
     channel: int = 0
     attributes: dict[int, AttributeState] = field(default_factory=dict)
+    absent: set[int] = field(default_factory=set)
+    """Optional attributes this node answered `UNSUPPORTED_ELEMENT` for.
+
+    The descriptor shows features, not which optional attributes an endpoint carries —
+    a key with `HOLD` may expose `HoldThreshold` or set the threshold itself
+    (types/0x0010-key-input.md §2.4). The hub learns it from the first refusal while
+    reconciling rather than by probing every optional attribute at enumeration: that
+    would cost up to a dozen transactions per key to answer a question nobody has asked
+    yet (zadania/CR-01.md, N10).
+
+    Not stored: after a restart the hub learns it again at the first reconciliation,
+    and a new enumeration builds a new model, so a firmware that starts exposing the
+    attribute is not held back by old knowledge.
+    """
 
     @property
     def definition(self) -> TypeDef | None:
         return CATALOG.get(self.type_id) if self.type_id is not None else None
+
+    def lacks(self, meta: AttributeDef, value: Value | None = None) -> str | None:
+        """Why this endpoint cannot take `meta` (with `value`, when given) — or `None`.
+
+        One answer for the API and for reconciling alike: the hub configures only what
+        the endpoint declared (01-model-danych.md §2.1, COMPLIANCE `LB-HUB-026`).
+        """
+        if meta.feature is not None and not self.features & meta.feature:
+            return f"{meta.name} needs a feature this endpoint does not declare"
+        if meta.id in self.absent:
+            return f"the device does not expose {meta.name} — it sets it itself"
+        needed = meta.value_feature(value) if value is not None else None
+        if needed is not None and not self.features & needed:
+            return f"{meta.name} = {value} needs a feature this endpoint does not declare"
+        return None
 
 
 @dataclass(slots=True)

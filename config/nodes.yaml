@@ -18,14 +18,12 @@ nodes:
       4:
         type: KeyInput
         name: "Left key"
-        DebounceTime: 25
-        HoldThreshold: 550
-
+        # Only what this key declares: a key without MULTICLICK has no EventMode,
+        # and a timing it does not expose it sets itself — the hub reports either
+        # as an issue rather than sending it (01-model-danych.md §2.1).
         EventMode: CLICK
-        MultiClickWindow: 200
-        MaxClicks: 2
         HoldEnabled: true
-        Invert: true
+        HoldThreshold: 550
   "08090a0b0c0d0e0f":
     alias: kitchen-relay
     name: "The lamp over the table"

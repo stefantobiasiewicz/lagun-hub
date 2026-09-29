@@ -27,7 +27,7 @@ nodes:
     alias: kitchen-switch
     name: "The kitchen key"
     endpoints:
-      4: { type: KeyInput, DebounceTime: 25, HoldThreshold: 600 }
+      4: { type: KeyInput, HoldTickInterval: 300, HoldThreshold: 600 }
   "08090a0b0c0d0e0f":
     alias: kitchen-relay
     name: "The lamp over the table"
@@ -71,7 +71,10 @@ class TestLoading:
         config = load(save(tmp_path))
         switch = config.node(SWITCH)
         assert switch is not None
-        assert switch.endpoints[4].attributes == {ki.DEBOUNCE_TIME: 25, ki.HOLD_THRESHOLD: 600}
+        assert switch.endpoints[4].attributes == {
+            ki.HOLD_TICK_INTERVAL: 300,
+            ki.HOLD_THRESHOLD: 600,
+        }
 
     def test_an_enum_value_by_name(self, tmp_path: Path) -> None:
         config = load(save(tmp_path))
@@ -149,8 +152,8 @@ class TestStaticValidation:
         load(save(tmp_path, content))
 
     def test_an_attribute_out_of_range(self, tmp_path: Path) -> None:
-        content = BASE.replace("DebounceTime: 25", "DebounceTime: 1000")
-        with pytest.raises(ConfigError, match="is outside 5…100"):
+        content = BASE.replace("HoldTickInterval: 300", "HoldTickInterval: 5000")
+        with pytest.raises(ConfigError, match="is outside 50…1000"):
             load(save(tmp_path, content))
 
     def test_an_unknown_enum_value(self, tmp_path: Path) -> None:
@@ -199,7 +202,7 @@ class TestStaticValidation:
     def test_a_non_reporting_attribute_cannot_be_a_source(self, tmp_path: Path) -> None:
         """The hub would never learn about the change (07-hub.md §3.1)."""
         content = BASE.replace(
-            "type: KeyInput, event: Click", "type: KeyInput, attribute: DebounceTime"
+            "type: KeyInput, event: Click", "type: KeyInput, attribute: HoldTickInterval"
         )
         with pytest.raises(ConfigError, match="is not reported"):
             load(save(tmp_path, content))
@@ -212,7 +215,7 @@ class TestStaticValidation:
             load(save(tmp_path, content))
 
     def test_an_attribute_without_an_endpoint_type(self, tmp_path: Path) -> None:
-        content = BASE.replace("4: { type: KeyInput, DebounceTime", "4: { DebounceTime")
+        content = BASE.replace("4: { type: KeyInput, HoldTickInterval", "4: { HoldTickInterval")
         with pytest.raises(ConfigError, match="`type`"):
             load(save(tmp_path, content))
 

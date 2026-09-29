@@ -257,7 +257,7 @@ Wniosek dla implementacji: **`QueryEnabled` wylicza się z pliku konfiguracji, n
 ## 7. Konfiguracja endpointów
 
 Każdy typ endpointu niesie własne atrybuty konfiguracyjne — `RW`, trwałe. Klawisz ma
-`DebounceTime` i `HoldThreshold`, wyjście `PowerOnBehaviour` i `AutoOffTime`, a **wszystkie
+`EventMode` i `HoldThreshold`, wyjście `PowerOnBehaviour` i `AutoOffTime`, a **wszystkie
 endpointy funkcjonalne** mają wspólne `Enabled`, `ReportInterval`, `ReportMinGap`
 i `ReportHysteresis` ([`01-model-danych.md`](../lagunbus-spec/01-model-danych.md) §4).
 
@@ -272,12 +272,11 @@ nodes:
     room: kuchnia
     endpoints:
       4:
-        Invert: true            # fakt MONTAŻOWY — jak podpięto przycisk
-        DebounceTime: 25
-        HoldThreshold: 600
+        EventMode: MULTICLICK   # tylko gdy klawisz ma cechę MULTICLICK
+        HoldThreshold: 600      # tylko gdy klawisz go wystawia
         groups: [all-lights]    # przez komendy Groups, nie przez zapis atrybutu
       5:
-        DebounceTime: 25
+        HoldEnabled: false      # klawisz sceny obok klawisza oświetlenia
 
   kitchen-relay:
     uid: "1112131415161718"
@@ -289,9 +288,9 @@ nodes:
         ReportInterval: 300
 ```
 
-Cztery rzeczy warte powiedzenia od razu:
+Pięć rzeczy wartych powiedzenia od razu:
 
-**Nazwa atrybutu, nie numer.** W pliku piszemy `DebounceTime`, nie `0x10`. Tłumaczenie robi
+**Nazwa atrybutu, nie numer.** W pliku piszemy `HoldThreshold`, nie `0x15`. Tłumaczenie robi
 katalog [`types/`](../lagunbus-spec/types/) — ten sam, który daje walidację offline (§10).
 Numer byłby nieczytelny i nie dałby się sprawdzić bez sprzętu.
 
@@ -303,6 +302,16 @@ ustawia go plikiem, tylko komendą. Granica biegnie dokładnie po kolumnach kata
 | `RW` | `P` | **konfiguracja** | plik, uzgadniana (§8) |
 | `RW` | `V` | nastawa robocza | komenda albo zapis w czasie pracy |
 | `RO` | — | stan | odczyt z węzła, nigdy z pliku |
+
+**Konfiguruje się tylko to, co endpoint zadeklarował.** Plik sprawdzany offline zna tylko
+typ, więc przepuści `EventMode: RAW` dla każdego klawisza. Węzeł podaje jednak przy
+rozpoznaniu swoje cechy, więc hub **nie wysyła** atrybutu ani wartości spoza nich — zgłasza
+wpis jako problem do usunięcia z pliku ([`01-model-danych.md`](../lagunbus-spec/01-model-danych.md) §2.1).
+Atrybut opcjonalny, którego węzeł nie wystawia (klawisz z `HOLD` może ustalać próg sam),
+wychodzi przy pierwszym uzgodnieniu: węzeł odpowiada „nie mam", hub to zapamiętuje, zgłasza
+i od tej chwili API odmawia zapisu bez pytania węzła. Nie odpytujemy wszystkich atrybutów
+opcjonalnych przy rozpoznaniu — kosztowałoby to kilkanaście transakcji na panel dla pytania,
+którego nikt jeszcze nie zadał (`zadania/CR-01.md`, N10).
 
 **Atrybut, którego w pliku nie ma, nie jest dotykany.** Nie ma czegoś takiego jak „przywróć
 domyślną" — od tego jest `FactoryReset`. Plik opisuje odstępstwa od tego, co węzeł ma
@@ -322,8 +331,8 @@ powstanie panel konfiguracyjny:
 
 | Przykład | Czym jest | Kto to ustawia |
 |---|---|---|
-| `Invert` | fakt montażowy | instalator, raz, przy podłączeniu |
-| `DebounceTime`, `HoldThreshold` | strojenie pod konkretny przycisk | człowiek, gdy coś działa niewygodnie |
+| `EventMode`, `HoldEnabled` | sposób użycia klawisza | operator, przy pierwszej konfiguracji |
+| `HoldThreshold` | strojenie pod konkretny przycisk | człowiek, gdy coś działa niewygodnie |
 | `ReportInterval` | polityka całej instalacji | operator, zwykle globalnie |
 | `Purpose` | znaczenie dla systemu nadrzędnego | operator, przy pierwszej konfiguracji |
 
@@ -459,7 +468,7 @@ Z tych dwóch zdań wynika wszystko poniżej.
                                      └──►  Snapshot  ──────────────►  ścieżka szybka, API
 ```
 
-Kusi, żeby zapis `DebounceTime` z aplikacji poszedł prosto do węzła — jest krótszy i widać
+Kusi, żeby zapis `HoldThreshold` z aplikacji poszedł prosto do węzła — jest krótszy i widać
 skutek od razu. Byłaby to jednak **druga droga do tej samej rzeczy**, a wtedy plik przestaje
 opisywać instalację i zaczyna opisywać to, co ktoś kiedyś w nim napisał. Uzgadnianie (§8)
 cofnęłoby zresztą taki zapis przy pierwszym sprawdzeniu zgodności — i miałoby rację.
@@ -474,8 +483,8 @@ czego potrzebuje każdy współdzielony dokument: **wersji**.
 
 ```
 GET  /config                  →  200, ETag: "sha256:a1b2…"
-PUT  /config/nodes/08090a0b0c0d0e0f/endpoints/4/DebounceTime
-     If-Match: "sha256:a1b2…"      { "value": 25 }
+PUT  /config/nodes/08090a0b0c0d0e0f/endpoints/4/HoldThreshold
+     If-Match: "sha256:a1b2…"      { "value": 600 }
                               →  200  zapisane, nowy ETag
                               →  409  ktoś zmienił plik w międzyczasie — odśwież i spróbuj
                               →  422  konfiguracja niepoprawna, NIC nie zapisano

@@ -23,10 +23,12 @@ from lagunhub.api import ApiError, HubApi, Problem
 from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.config.store import ConfigStore
+from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.endpoints import output as out
 from lagunhub.protocol.registry import CommonAttribute
 from tests.conftest import Clock
 from tests.node.devices import key1, relay1
+from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
 from tests.node.node import NodeCore
 from tests.test_enumeration import Rig, joined
@@ -52,7 +54,7 @@ nodes:
     name: "The kitchen key"
     room: kitchen
     endpoints:
-      4: { type: KeyInput, DebounceTime: 25, ReportInterval: 60 }
+      4: { type: KeyInput, HoldThreshold: 600, ReportInterval: 60 }
   "08090a0b0c0d0e0f":
     alias: kitchen-relay
     name: "The lamp over the table"
@@ -272,7 +274,7 @@ class TestAttributeWrite:
     """`config_set_attribute` — the write that **adds `type` when it is missing**.
 
     The loader requires an endpoint to give a type before it gets an attribute: without
-    that there is no way to check whether `DebounceTime` exists on that type at all. On a
+    that there is no way to check whether `HoldThreshold` exists on that type at all. On a
     fresh configuration the first write therefore ended in an error that sounded like a
     hub fault and was one missing line.
     """
@@ -306,6 +308,65 @@ class TestAttributeWrite:
             )
         assert error.value.problem is Problem.INVALID
         assert "is state" in error.value.message
+
+
+class TestOnlyWhatTheEndpointDeclares:
+    """The hub configures only what an endpoint declared (01-model-danych.md §2.1,
+    `LB-HUB-026`) — and says so **before** the file or the bus, not after a refusal.
+
+    `key1` has `HOLD` and `MULTICLICK`, no `RAW`, and exposes `HoldThreshold` but sets
+    its other timings itself (zadania/CR-01.md, N10).
+    """
+
+    @pytest.fixture
+    def switch(self, hub: Hub, clock: Clock) -> NodeCore:
+        return hub.join(key1(uid=SWITCH_UID, address=0, clock=clock, name="sw"))
+
+    def test_a_value_of_an_undeclared_feature_never_reaches_the_file(
+        self, hub: Hub, switch: NodeCore
+    ) -> None:
+        before = hub.path.read_text(encoding="utf-8")
+        with pytest.raises(ApiError) as error:
+            hub.api.config_set_attribute(
+                "kitchen-switch", 4, "EventMode", "RAW", etag=hub.api.config().etag
+            )
+        assert error.value.problem is Problem.INVALID
+        assert "feature" in error.value.message
+        assert hub.path.read_text(encoding="utf-8") == before
+
+    def test_nor_the_bus(self, hub: Hub, switch: NodeCore) -> None:
+        before = hub.api.health().transactions["opened"]
+        with pytest.raises(ApiError):
+            hub.api.write("kitchen-switch", 4, "EventMode", "RAW")
+        assert hub.api.health().transactions["opened"] == before
+
+    def test_a_value_of_a_declared_feature_goes_through(self, hub: Hub, switch: NodeCore) -> None:
+        hub.api.write("kitchen-switch", 4, "EventMode", "MULTICLICK")
+        assert switch.endpoint(4, KeyInput).num(ki.EVENT_MODE) == ki.EventMode.MULTICLICK
+
+    def test_an_attribute_the_node_turned_down_is_refused_from_then_on(
+        self, hub: Hub, switch: NodeCore
+    ) -> None:
+        """The first write is let through — the hub cannot know yet. Reconciling finds
+        out, and from then on the API answers by itself."""
+        hub.api.config_set_attribute(
+            "kitchen-switch", 4, "HoldTickInterval", 300, etag=hub.api.config().etag
+        )
+        hub.inst.run(1.0, step=0.02)
+        assert any("does not expose HoldTickInterval" in i for i in hub.api.issues())
+
+        with pytest.raises(ApiError) as error:
+            hub.api.config_set_attribute(
+                "kitchen-switch", 4, "HoldTickInterval", 400, etag=hub.api.config().etag
+            )
+        assert error.value.problem is Problem.INVALID
+
+        ep4 = next(e for e in hub.api.node("kitchen-switch").detail if e.number == 4)
+        tick = next(a for a in ep4.attributes if a.name == "HoldTickInterval")
+        assert tick.available is False
+        assert tick.configurable is False
+        threshold = next(a for a in ep4.attributes if a.name == "HoldThreshold")
+        assert threshold.available is True, "what the node exposes stays configurable"
 
 
 class TestBusTraffic:

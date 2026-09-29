@@ -41,6 +41,10 @@ class AttributeView:
     configurable: bool = False
     """`RW` and persistent — that is, configuration, not state and not a working setting
     (KONFIGURACJA.md §7)."""
+    available: bool = True
+    """`False` when this endpoint cannot have the attribute — its feature is not
+    declared, or the node said it does not expose it and sets the value itself. Shown
+    anyway, for the same reason as `CommandView.available`."""
 
 
 @dataclass(frozen=True, slots=True)

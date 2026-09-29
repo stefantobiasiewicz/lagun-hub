@@ -5,7 +5,7 @@ All of it follows from one sentence in
 
 > **Configuration always goes through the file. The API writes the file, not the node.**
 
-It is tempting to let a `DebounceTime` write from the app go straight to the node — it
+It is tempting to let a `HoldThreshold` write from the app go straight to the node — it
 would be shorter and the effect would show at once. But that would be a **second route
 to the same thing**, and reconciling (§8) would undo such a write at the first check,
 and would be right to.

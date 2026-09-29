@@ -128,6 +128,10 @@ class Endpoint:
             return ResultCode.INVALID_VALUE
         if not in_range(carrying, value) or not self._within_bounds(meta, value):
             return ResultCode.INVALID_VALUE
+        if not self.has(meta.value_feature(value)):
+            # A value that exists only with a feature is out of range without it —
+            # `EventMode = RAW` on a key without RAW (types/0x0010-key-input.md §2.3).
+            return ResultCode.INVALID_VALUE
         self.values[attribute] = value
         self.on_write(attribute, value)
         if meta.reported:

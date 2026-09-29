@@ -13,11 +13,12 @@ from lagunhub.core.config.apply import apply
 from lagunhub.core.model import NodeModel, Uid
 from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.endpoints import output as out
-from lagunhub.protocol.registry import CommonAttribute, MessageKind
+from lagunhub.protocol.registry import CommonAttribute, MessageKind, NodeClass
 from tests.conftest import Clock
 from tests.node.devices import key1, panel3, relay1
 from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
+from tests.node.node import NodeCore
 from tests.test_enumeration import Rig, joined
 
 SWITCH = Uid(bytes(range(8)))
@@ -33,7 +34,7 @@ nodes:
     alias: kitchen-switch
     name: "The kitchen key"
     endpoints:
-      4: { type: KeyInput, DebounceTime: 25, HoldThreshold: 600 }
+      4: { type: KeyInput, EventMode: MULTICLICK, HoldThreshold: 600 }
   "08090a0b0c0d0e0f":
     alias: kitchen-relay
     name: "The lamp over the table"
@@ -72,8 +73,8 @@ class TestReconciling:
         because `TypeDef` did not know them, and reconciling quietly skipped the number.
         """
         common_ = CONFIG.replace(
-            "4: { type: KeyInput, DebounceTime: 25, HoldThreshold: 600 }",
-            "4: { type: KeyInput, DebounceTime: 25, ReportInterval: 60, Enabled: true }",
+            "4: { type: KeyInput, EventMode: MULTICLICK, HoldThreshold: 600 }",
+            "4: { type: KeyInput, EventMode: MULTICLICK, ReportInterval: 60, Enabled: true }",
         )
         inst = build(clock, tmp_path, common_)
         node = joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
@@ -87,12 +88,12 @@ class TestReconciling:
         node = joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
 
         key = node.endpoint(4, KeyInput)
-        assert key.num(ki.DEBOUNCE_TIME) == 25
+        assert key.num(ki.EVENT_MODE) == ki.EventMode.MULTICLICK
         assert key.num(ki.HOLD_THRESHOLD) == 600
 
     def test_what_already_agrees_is_not_rewritten(self, clock: Clock, tmp_path: Path) -> None:
         """The hub writes to a node only when the picture has drifted."""
-        content = CONFIG.replace("DebounceTime: 25, HoldThreshold: 600", "DebounceTime: 15")
+        content = CONFIG.replace("EventMode: MULTICLICK, HoldThreshold: 600", "HoldThreshold: 500")
         inst = build(clock, tmp_path, content)
         joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
 
@@ -111,7 +112,7 @@ class TestReconciling:
         """The second phase of validation — against a real installation
         (KONFIGURACJA.md §10)."""
         content = CONFIG.replace(
-            "4: { type: KeyInput, DebounceTime: 25, HoldThreshold: 600 }",
+            "4: { type: KeyInput, EventMode: MULTICLICK, HoldThreshold: 600 }",
             "4: { type: Output, Purpose: LIGHT }",
         )
         inst = build(clock, tmp_path, content)
@@ -122,9 +123,9 @@ class TestReconciling:
 
     def test_an_endpoint_the_node_does_not_have(self, clock: Clock, tmp_path: Path) -> None:
         content = CONFIG.replace(
-            "      4: { type: KeyInput, DebounceTime: 25, HoldThreshold: 600 }",
-            "      4: { type: KeyInput, DebounceTime: 25 }\n"
-            "      9: { type: KeyInput, DebounceTime: 25 }",
+            "      4: { type: KeyInput, EventMode: MULTICLICK, HoldThreshold: 600 }",
+            "      4: { type: KeyInput, HoldThreshold: 600 }\n"
+            "      9: { type: KeyInput, HoldThreshold: 600 }",
         )
         inst = build(clock, tmp_path, content)
         joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
@@ -143,6 +144,61 @@ class TestReconciling:
         assert inst.core.reconcile.failed >= 1 or inst.core.enumeration.failed >= 1
 
 
+class TestOnlyWhatTheEndpointDeclares:
+    """Reconciling sends nothing an endpoint cannot have — the file is wrong, not the
+    node (01-model-danych.md §2.1, `LB-HUB-026`; zadania/CR-01.md, N10)."""
+
+    def test_a_value_of_an_undeclared_feature_is_not_written(
+        self, clock: Clock, tmp_path: Path
+    ) -> None:
+        content = CONFIG.replace("EventMode: MULTICLICK", "EventMode: RAW")
+        inst = build(clock, tmp_path, content)
+        node = joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
+
+        assert any("EventMode = 2 needs a feature" in i for i in inst.installation.issues)
+        assert node.endpoint(4, KeyInput).num(ki.EVENT_MODE) == ki.EventMode.CLICK
+        assert inst.core.reconcile.failed == 0
+
+    def test_an_attribute_of_an_undeclared_feature_is_not_sent(
+        self, clock: Clock, tmp_path: Path
+    ) -> None:
+        """A doorbell: no features, so not a single attribute to configure."""
+        content = CONFIG.replace("EventMode: MULTICLICK, HoldThreshold: 600", "HoldEnabled: false")
+        inst = build(clock, tmp_path, content)
+        bell = NodeCore(
+            uid=bytes(range(8)),
+            device_type=0x01F0,
+            node_class=NodeClass.CONTROL,
+            functional={4: KeyInput(channel=1)},
+            address=0,
+            clock=clock,
+            name="bell",
+        )
+        joined(inst, bell)
+
+        assert any("HoldEnabled needs a feature" in i for i in inst.installation.issues)
+        assert inst.core.reconcile.checked == 0, "not even a read went out"
+
+    def test_an_optional_attribute_the_node_lacks_is_learned_once(
+        self, clock: Clock, tmp_path: Path
+    ) -> None:
+        content = CONFIG.replace("EventMode: MULTICLICK", "HoldTickInterval: 300")
+        inst = build(clock, tmp_path, content)
+        joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
+
+        issues = [i for i in inst.installation.issues if "HoldTickInterval" in i]
+        assert issues and "does not expose" in issues[0]
+        assert inst.core.reconcile.failed == 0, "a device setting it itself is no failure"
+        model = inst.installation.nodes[SWITCH]
+        assert ki.HOLD_TICK_INTERVAL in model.endpoints[4].absent
+
+        opened = inst.core.transactions.opened
+        inst.core.reconcile.start(model)
+        inst.run(0.5, step=0.02)
+        # HoldThreshold is read again to check agreement; HoldTickInterval is not asked.
+        assert inst.core.transactions.opened == opened + 1
+
+
 class TestBindingOnAttributeChange:
     """07-hub.md §3.1 — it fires on a **change of value**, not on every report."""
 
@@ -151,7 +207,7 @@ class TestBindingOnAttributeChange:
         "from: { node: kitchen-relay, endpoint: 4, type: Output, attribute: OnOff }",
     ).replace(
         "to:   { node: kitchen-relay,  endpoint: 4, type: Output,   command: Toggle }",
-        "to:   { node: kitchen-switch, endpoint: 4, type: KeyInput, attribute: Invert }",
+        "to:   { node: kitchen-switch, endpoint: 4, type: KeyInput, attribute: HoldEnabled }",
     )
 
     def test_a_change_fires_it(self, clock: Clock, tmp_path: Path) -> None:
@@ -209,7 +265,7 @@ bindings:
   - from: { node: sw, endpoint: 4, type: KeyInput, event: Click }
     to:   { node: relay, endpoint: 4, type: Output, command: Toggle }
   - from: { node: relay, endpoint: 4, type: Output, attribute: OnOff }
-    to:   { node: sw, endpoint: 4, type: KeyInput, attribute: Invert }
+    to:   { node: sw, endpoint: 4, type: KeyInput, attribute: HoldEnabled }
   - from: { node: sw, endpoint: 5, type: KeyInput, event: Click }
     to:   { group: all-lights, endpoint: 0, type: Output, command: Off }
 """

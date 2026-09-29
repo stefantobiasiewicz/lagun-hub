@@ -58,7 +58,21 @@ class AttributeDef:
     lo: int | None = None
     hi: int | None = None
     feature: int | None = None
-    """The feature bit without which this attribute does not exist on the endpoint."""
+    """The feature bits without which this attribute does not exist on the endpoint.
+
+    A mask, and **any one** of its bits is enough: conformance ``[MULTICLICK, RAW]``
+    (01-model-danych.md §8) is the mask ``MULTICLICK | RAW``. A single feature is simply
+    a mask of one bit.
+    """
+
+    value_features: tuple[tuple[int, int], ...] = ()
+    """``(value, feature)`` pairs: an enumeration value that exists only with a feature.
+
+    `KeyInput.EventMode` is the case: ``RAW`` is a value of an attribute every
+    multi-mode key has, but only a key declaring ``RAW`` may take it — a write of it
+    anywhere else is out of range (types/0x0010-key-input.md §2.3). A pair list rather
+    than a dict, because a frozen definition should stay hashable.
+    """
 
     optional: bool = False
     """Conformance ``O`` from the type catalogue: a device **may** have it.
@@ -67,6 +81,13 @@ class AttributeDef:
     finds out from an ``UNSUPPORTED_ELEMENT`` reply. That is why the node double has no
     optional ones by default: so that the hub has to cope.
     """
+
+    def value_feature(self, value: Value) -> int | None:
+        """The feature a value needs, or `None` when any endpoint may take it."""
+        for known, feature in self.value_features:
+            if known == value:
+                return feature
+        return None
 
     @property
     def readable(self) -> bool:

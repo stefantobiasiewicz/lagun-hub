@@ -311,7 +311,9 @@ class HubApi:
             meta = self._named(definition.attribute, attribute, "attribute")
             if not meta.writable:
                 raise ApiError(Problem.INVALID, f"{meta.name} is read-only")
-            return node, meta.id, self._encode(meta, value, model)
+            encoded = self._encode(meta, value, model)
+            self._exposed(model, meta, coerce(meta, value), ref, endpoint)
+            return node, meta.id, encoded
 
         return self._act(assemble, endpoint, MessageKind.WRITE)
 
@@ -387,7 +389,7 @@ class HubApi:
 
         The loader requires an endpoint to give a type before it gets an attribute
         ([`KONFIGURACJA.md`](../KONFIGURACJA.md) §10): without it there is no way to
-        check whether `DebounceTime` exists on that type at all. On a fresh
+        check whether `HoldThreshold` exists on that type at all. On a fresh
         configuration the first write therefore ended in an error that sounded like a
         hub fault and was an ordinary missing line.
 
@@ -397,11 +399,16 @@ class HubApi:
 
         def collect(inst: Installation) -> tuple[str, list[tuple[tuple[str, ...], Any]]]:
             uid = self._find(inst, ref)
-            _, _, definition = self._functional(inst, ref, endpoint)
+            _, model, definition = self._functional(inst, ref, endpoint)
             meta = self._named(definition.attribute, attribute, "attribute")
             if not (meta.writable and meta.persist):
                 kind = "state" if not meta.writable else "a working setting"
                 raise ApiError(Problem.INVALID, f"{meta.name} is {kind}, not configuration")
+            try:
+                wanted = coerce(meta, value)
+            except ValueError:
+                wanted = None  # a bad value is the loader's to reject, with its own words
+            self._exposed(model, meta, wanted, ref, endpoint)
             base = f"nodes/{bytes(uid).hex()}/endpoints/{endpoint}"
             changes: list[tuple[tuple[str, ...], Any]] = []
             if not self._has_type(inst, uid, endpoint):
@@ -627,12 +634,18 @@ class HubApi:
             )
         wanted_values = description.attributes if description else {}
         return tuple(
-            self._attribute(meta, model.attributes.get(number), wanted_values.get(number))
+            self._attribute(
+                meta, model.attributes.get(number), wanted_values.get(number), model.lacks(meta)
+            )
             for number, meta in sorted(definition.attributes.items())
         )
 
     def _attribute(
-        self, meta: AttributeDef, state: AttributeState | None, wanted: Value | None
+        self,
+        meta: AttributeDef,
+        state: AttributeState | None,
+        wanted: Value | None,
+        missing: str | None = None,
     ) -> AttributeView:
         value = _plain(state.value) if state else None
         return AttributeView(
@@ -648,7 +661,8 @@ class HubApi:
             wanted_label=render(meta, wanted) if wanted is not None else None,
             matches=None if wanted is None or state is None else state.value == wanted,
             choices=choices(meta),
-            configurable=meta.writable and meta.persist,
+            configurable=meta.writable and meta.persist and missing is None,
+            available=missing is None,
         )
 
     def _age(self, state: AttributeState | None) -> float | None:
@@ -874,6 +888,20 @@ class HubApi:
                 f"{ref} ep{endpoint}: the hub does not know this endpoint's type yet",
             )
         return node, model, definition
+
+    @staticmethod
+    def _exposed(
+        model: EndpointModel, meta: AttributeDef, value: Value | None, ref: str, endpoint: int
+    ) -> None:
+        """Refuse what this endpoint cannot have — **before** the file or the node.
+
+        The hub knows the features from enumeration and remembers the optional
+        attributes a node turned down, so it answers here rather than letting the
+        request go out and come back refused (01-model-danych.md §2.1, `LB-HUB-026`).
+        """
+        reason = model.lacks(meta, value)
+        if reason is not None:
+            raise ApiError(Problem.INVALID, f"{ref} ep{endpoint}: {reason}")
 
     def _named[T](self, lookup: Callable[[str], T], name: str, what: str) -> T:
         try:

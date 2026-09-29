@@ -103,8 +103,11 @@ class Reconciler:
                 meta = definition.attributes.get(element)
                 if meta is None:
                     continue
-                if meta.feature is not None and not present.features & meta.feature:
-                    self._issue(node, f"ep{number} lacks the feature {meta.name} requires")
+                reason = present.lacks(meta, value)
+                if reason is not None:
+                    # Not a write for the node to refuse: the hub knows from the
+                    # descriptor, so the file is what is wrong (LB-HUB-026).
+                    self._issue(node, f"ep{number}: {reason} — remove it from the configuration")
                     continue
                 out.append((number, meta, value))
         return out
@@ -136,6 +139,19 @@ class Reconciler:
     ) -> None:
         if not outcome.answered:
             self._abandon(task, f"ep{endpoint} {meta.name}: the node does not answer")
+            return
+        if outcome.result == ResultCode.UNSUPPORTED_ELEMENT and meta.optional:
+            # Not a failure: the device sets this itself (types/0x0010-key-input.md
+            # §2.4). Remembered, so that the API refuses it from now on without asking
+            # the node (zadania/CR-01.md, N10).
+            task.pending.pop(0)
+            task.node.endpoint(endpoint).absent.add(meta.id)
+            self._issue(
+                task.node,
+                f"ep{endpoint}: {task.node.endpoint(endpoint).lacks(meta)} — "
+                f"remove it from the configuration",
+            )
+            self._step(task)
             return
         if outcome.result != ResultCode.OK:
             task.pending.pop(0)

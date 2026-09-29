@@ -16,6 +16,7 @@ from lagunhub.core.model import Installation, NodeState, Snapshot, Uid
 from lagunhub.core.rx import ColdItem, Received
 from lagunhub.protocol.bus import VirtualNetwork
 from lagunhub.protocol.endpoints import device as dev
+from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.registry import (
     FIRST_FUNCTIONAL_ENDPOINT,
     EndpointType,
@@ -26,6 +27,7 @@ from tests.node.devices import key1, panel3, relay1
 from tests.node.node import NodeCore
 
 PANEL_UID = bytes(range(16, 24))
+_KEY = ki.Feature.MULTICLICK | ki.Feature.HOLD | ki.Feature.RAW
 
 
 class Rig:
@@ -93,9 +95,9 @@ class TestDescriptor:
             if number >= FIRST_FUNCTIONAL_ENDPOINT
         }
         assert description == {
-            4: (EndpointType.KeyInput, 1, 0),
-            5: (EndpointType.KeyInput, 2, 0),
-            6: (EndpointType.KeyInput, 3, 0),
+            4: (EndpointType.KeyInput, 1, _KEY),
+            5: (EndpointType.KeyInput, 2, _KEY),
+            6: (EndpointType.KeyInput, 3, _KEY),
             7: (EndpointType.Output, 0, 0b11),
             8: (EndpointType.Sense, 0, 0),
         }
