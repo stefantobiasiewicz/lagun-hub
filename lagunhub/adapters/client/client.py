@@ -1,12 +1,17 @@
-"""The hub client — **the only place in the CLI that knows about HTTP**.
+"""The hub client — **the only place on the client side that knows about HTTP**.
 
-The shell talks to a hub running as a service, so the transport has to live somewhere.
-It lives here and nowhere else: `commands.py` receives an object with the same operations
-as `HubApi` on the hub side, and has no way of learning which side it is on.
+The full-screen view talks to a hub running as a service, so the transport has to live
+somewhere. It lives here and nowhere else: the view receives an object that satisfies
+`Hub` — the same operations as `HubApi` on the hub side — and has no way of learning
+which side it is on. That is also what lets its tests run on a fake hub.
+
+There used to be a second client over this one, the `lagun-hub shell` REPL; it was
+removed, because the view covers every operation it had (`zadania/zrobione/CR-06.md`,
+[`ARCHITEKTURA.md`](../../../ARCHITEKTURA.md) §10.3).
 
 **Replies come back as the same frozen dataclasses the hub exposes.** That costs one
 layer of assembly from JSON and gives something there would otherwise not be: a change
-of a view’s shape in `api/views.py` breaks `mypy` in the CLI instead of breaking quietly for
+of a view’s shape in `api/views.py` breaks `mypy` in the client instead of breaking quietly for
 a person at the terminal.
 
 The transport is from the standard library — the same as the server, and for the same
@@ -20,13 +25,13 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import fields, is_dataclass
 from http.client import HTTPResponse
 from pathlib import Path
 from types import UnionType
-from typing import Any, Final, get_args, get_origin, get_type_hints
+from typing import Any, Final, Protocol, get_args, get_origin, get_type_hints
 from urllib.parse import quote
 
 from lagunhub.api import (
@@ -51,6 +56,49 @@ TIMEOUT: Final = 5.0
 TOKEN_ENV: Final = "LAGUN_TOKEN"
 
 PROBLEMS: Final[dict[str, Problem]] = {problem.value: problem for problem in Problem}
+
+
+class Hub(Protocol):
+    """What a client needs from the hub. Both `HubApi` and `HubClient` satisfy it."""
+
+    def info(self) -> HubInfo: ...
+    def nodes(self) -> tuple[NodeSummary, ...]: ...
+    def node(self, ref: str) -> NodeView: ...
+    def endpoint(self, ref: str, number: int) -> EndpointView: ...
+    def bindings(self) -> tuple[BindingView, ...]: ...
+    def issues(self) -> tuple[str, ...]: ...
+    def health(self) -> HealthView: ...
+    def commissioning(self) -> CommissioningView: ...
+    def diff(self) -> tuple[DiffRow, ...]: ...
+    def command(
+        self, ref: str, endpoint: int, name: str, args: Mapping[str, Any] | None = None
+    ) -> ActionView: ...
+    def write(self, ref: str, endpoint: int, attribute: str, value: Any) -> ActionView: ...
+    def read(self, ref: str, endpoint: int, attribute: str) -> ActionView: ...
+    def identify(self, ref: str, seconds: int = 5) -> ActionView: ...
+    def accept_new(self, seconds: float = 900.0) -> CommissioningView: ...
+    def admit(self, short_id: int) -> CommissioningView: ...
+    def factory_reset(self, short_id: int) -> ActionView: ...
+    def config(self) -> ConfigView: ...
+    def config_set(self, path: str, value: Any, *, etag: str) -> ConfigView: ...
+    def config_delete(self, path: str, *, etag: str) -> ConfigView: ...
+    def reconcile(self, ref: str) -> ReconcileView: ...
+    def config_set_attribute(
+        self, ref: str, endpoint: int, attribute: str, value: Any, *, etag: str
+    ) -> ConfigView: ...
+    def config_adopt(self, ref: str, endpoint: int, attribute: str, *, etag: str) -> ConfigView: ...
+    def stream(self) -> AbstractContextManager[Iterable[EventView]]:
+        """Live events. A client only iterates over them, so this is enough — and that is
+        what lets both an in-process hub and an HTTP client satisfy it.
+
+        The view does not use it (its lists are polled, its feed is `frames()`); it stays
+        so that `HubClient` mirrors the whole HTTP API and the conformance test keeps
+        both sides honest (`zadania/zrobione/CR-06.md`, N5)."""
+        ...
+
+    def frames(self) -> AbstractContextManager[Iterable[TrafficView]]:
+        """Live traffic on the bus."""
+        ...
 
 
 class HubClient:
@@ -324,7 +372,7 @@ def discover(config: Path, url: str | None = None, token: str | None = None) -> 
     """Address and token: from the arguments, from the environment, finally from the hub’s
     files.
 
-    The last route is what makes `lagun-hub shell` on the same machine work **without a
+    The last route is what makes `lagun-hub tui` on the same machine work **without a
     single argument** — and that is the commonest case.
     The directory comes from `--config` or from `$LAGUN_CONFIG`.
     """

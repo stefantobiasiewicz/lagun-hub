@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="2b · Full-screen view (needs a running hub)" type="PythonConfigurationType" factoryName="Python">
+  <configuration default="false" name="2 · Full-screen view (needs a running hub)" type="PythonConfigurationType" factoryName="Python">
     <module name="hub" />
     <option name="ENV_FILES" value="" />
     <option name="INTERPRETER_OPTIONS" value="" />

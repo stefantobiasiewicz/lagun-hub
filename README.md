@@ -11,7 +11,7 @@ Implementacja huba instalacji [LagunBus](../lagunbus-spec/) w Pythonie.
 **Stan: potwierdzony POC; przed nami wyjście na sprzęt** (§ [Raspberry Pi](#raspberry-pi) niżej).
 Naciśnięcie klawisza zapala przekaźnik, a dopasowanie powiązania zajmuje kilkadziesiąt
 mikrosekund. Hub wystawia własne API — sterowanie, konfigurację, strumień zdarzeń
-i ruch na magistrali — a nad nim stoją powłoka i widok pełnoekranowy.
+i ruch na magistrali — a nad nim stoi widok pełnoekranowy.
 
 ---
 
@@ -45,15 +45,13 @@ Potem w liście konfiguracji są gotowe pozycje:
 | **1 · Hub (UDP, simulators)** | `lagun-hub run --udp --ephemeral --accept-new --config config` — on a temporary copy of `config/` |
 | **3a · Sim: kitchen-relay** | `lagun-sim output --channels 8` as `kitchen-relay` (`08090a0b0c0d0e0f`), fresh every run |
 | **3b · Sim: test key** | `lagun-sim key --channels 4` as `test` (`a201020304050607`), bound to the relay in `config/bindings.yaml` |
-| **2 · Shell** | `lagun-hub shell` przeciwko chodzącemu hubowi |
-| **2b · Full-screen view** | widok pełnoekranowy, też przeciwko chodzącemu hubowi |
+| **2 · Full-screen view** | `lagun-hub tui` przeciwko chodzącemu hubowi |
 | **4 · Identifier registry** | tabela identyfikatorów, jaką hub widzi |
 | **5 · Tests** | `pytest` na całym katalogu |
 
-Powłoka i widok **nie startują huba — dołączają się do chodzącego**, więc hub musi już
-pracować (`lagun-hub run`). Obie mają włączone *Emulate terminal in output console*,
-bo obie czytają z klawiatury; bez tego PyCharm nie przepuści wpisywania, a powłoce nie
-zadziała tabulator. The simulators (3a, 3b) need it too — each is a terminal view — and
+Widok **nie startuje huba — dołącza się do chodzącego**, więc hub musi już pracować
+(`lagun-hub run`). Ma włączone *Emulate terminal in output console*, bo czyta
+z klawiatury i rysuje w `curses`; bez tego PyCharm nie przepuści klawiszy. The simulators (3a, 3b) need it too — each is a terminal view — and
 their interpreter is `../lagun-sim/.venv`, installed as in
 [`../lagun-sim/README.md`](../lagun-sim/README.md).
 
@@ -261,8 +259,13 @@ Klawisz nie ma ani jednego atrybutu raportowanego, więc hub wie o nim tylko tyl
 Do dłuższej pracy — **strzałki zamiast wpisywania**:
 
 ```sh
-.venv/bin/lagun-hub tui
+.venv/bin/lagun-hub run --config config    # okno 1
+.venv/bin/lagun-hub tui                    # okno 2
 ```
+
+Widok **nie startuje huba — dołącza się do chodzącego**. Na tej samej maszynie adres
+i token bierze sam z `config/`, więc zwykle wystarcza `lagun-hub tui`; inaczej
+`--url`, `--token` albo `$LAGUN_TOKEN`.
 
 ```
 ┌─ LagunBus ─ parter ● ─ węzły 2/2 ─ usterek 0 ──────────────────────── 12:20:03 ─┐
@@ -315,53 +318,15 @@ Skąd ten układ i czego w nim jeszcze brakuje — [`ARCHITEKTURA.md`](ARCHITEKT
 Kolory niosą treść: węzeł bez adresu jest przygaszony, rozjazd z plikiem i powiązanie
 bez celu są czerwone, zgodność zielona.
 
-### Powłoka
-
-```sh
-.venv/bin/lagun-hub run --config config    # okno 1
-.venv/bin/lagun-hub shell                  # okno 2
-```
-
-Powłoka **nie startuje huba — dołącza się do chodzącego**. Na tej samej maszynie adres
-i token bierze sama z `config/`, więc zwykle wystarcza `lagun-hub shell`.
-
-```
-lagun> nodes
-ALIAS           NAZWA             UID               ADR    STAN   EP
-kitchen-switch  Klawisz w kuchni  0001020304050607  0x002  READY  1
-kitchen-relay   Lampa nad stołem  08090a0b0c0d0e0f  0x001  READY  1
-
-lagun> cmd kitchen-relay ep4 Toggle
-OK  (1 prób, 0.9 ms)
-
-lagun> diff
-WĘZEŁ          EP   ATRYBUT  W PLIKU  W WĘŹLE  STAN
-kitchen-relay  ep4  Purpose  LIGHT    VALVE    ROZJAZD
-```
-
-Dwa polecenia wyglądają podobnie i robią coś zupełnie innego — dlatego `help` mówi
-to wprost:
+Dwa klawisze wyglądają podobnie i robią coś zupełnie innego:
 
 | | |
 |---|---|
-| `set relay ep4 AutoOffTime 30` | **konfiguracja** → do pliku, a do węzła uzgadnianiem |
-| `write relay ep4 Level 128` | **nastawa robocza** → wprost do węzła, pliku nie dotyka |
+| `e` | **konfiguracja** → do pliku, a do węzła uzgadnianiem |
+| `w` | **nastawa robocza** → wprost do węzła, pliku nie dotyka |
 
-`feed on` włącza podgląd zdarzeń pod zachętą, `watch` strumieniuje do `Ctrl-C`.
-
-**Tabulator uzupełnia nad żywą instalacją.** Aliasy, numery endpointów, nazwy komend
-i dozwolone wartości biorą się z odpowiedzi huba — powłoka nie wie o typie `Output`
-niczego:
-
-```
-lagun> cmd kitchen-relay ep4 Tog⇥          →  Toggle
-lagun> set kitchen-relay ep4 Purpose ⇥     →  GENERIC  INDICATOR  LIGHT  VALVE
-lagun> set kitchen-relay ep4 ⇥             →  tylko to, co JEST konfiguracją
-```
-
-Ostatni wiersz jest sprawdzianem samego API: `OnOff` to stan, a `Level` nastawa robocza,
-więc pod `set` się nie pojawiają — podpowiedzenie ich prowadziłoby prosto w błąd
-„to jest stanem, nie konfiguracją".
+Powłoki `lagun-hub shell` już nie ma — widok robi wszystko, co ona, a do skryptów jest
+API niżej ([`ARCHITEKTURA.md`](ARCHITEKTURA.md) §10.3).
 
 ### API huba
 

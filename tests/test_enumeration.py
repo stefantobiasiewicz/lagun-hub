@@ -107,9 +107,10 @@ class TestSystemEndpoints:
     """The specification fixes the numbers and types, so the hub **does not ask** for
     them — it puts them in.
 
-    Before the shell it did not put them in either: it knew `Device`'s contents, because it
-    had read them, but had nowhere to put them. That came out only at the question "which
-    commands can I send", because `cmd <node> ep0 Reboot` answered "there is no ep0".
+    Before the shell (an early client, since removed) it did not put them in either: it
+    knew `Device`'s contents, because it had read them, but had nowhere to put them. That
+    came out only at the question "which commands can I send", because
+    `cmd <node> ep0 Reboot` answered "there is no ep0".
     """
 
     def test_every_node_has_ep0_ep1_ep2(self, clock: Clock) -> None:

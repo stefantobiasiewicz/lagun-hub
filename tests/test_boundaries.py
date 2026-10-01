@@ -1,6 +1,6 @@
 """The boundary between the hub's core and its clients — checked, not assumed.
 
-A client of a running hub (the shell, the full-screen view, the HTTP client under them)
+A client of a running hub (the full-screen view and the HTTP client under it)
 talks to it over HTTP and needs nothing from `core/` but the **shapes** of the answers,
 which live in `lagunhub.api.views` and `lagunhub.api.errors`. Until the API was split,
 importing one view dataclass dragged in the CORE thread, the configuration store and the
@@ -20,10 +20,7 @@ import pytest
 CLIENT_SIDE = (
     "lagunhub.api.views",
     "lagunhub.api.errors",
-    "lagunhub.adapters.cli.client",
-    "lagunhub.adapters.cli.commands",
-    "lagunhub.adapters.cli.render",
-    "lagunhub.adapters.cli.shell",
+    "lagunhub.adapters.client.client",
     "lagunhub.adapters.tui.app",
 )
 

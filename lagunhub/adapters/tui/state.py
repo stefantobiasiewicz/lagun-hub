@@ -23,7 +23,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Any, Final
 
-from lagunhub.adapters.cli.commands import Hub
+from lagunhub.adapters.client.client import Hub
 from lagunhub.api import (
     ApiError,
     BindingView,
@@ -42,8 +42,12 @@ FEED_DEPTH: Final = 2000
 history — as much as a person can read before scrolling anyway."""
 
 REFRESH: Final = 2.0
-"""How often to refresh the lists during silence. Changes arrive on the stream; this is
-a safety net, not the main route."""
+"""How often the lists are fetched again. The view reloads at once after its own actions,
+but a change that comes from the installation — a node joining, a click, a value
+reported — reaches the lists **only by this poll**, so it shows up to two seconds late.
+The feed below is no help: it carries `frames()`, and nothing reloads on a frame.
+Reloading on `stream()` events would make this a safety net instead of the main route
+([`ARCHITEKTURA.md`](../../../ARCHITEKTURA.md) §14)."""
 
 RETRY: Final = 2.0
 

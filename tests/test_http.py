@@ -399,7 +399,7 @@ class TestStream:
         connection.close()
 
     def test_a_client_disconnect_is_not_an_error(self, hub: Hub) -> None:
-        """A closed browser tab and leaving the shell look the same.
+        """A closed browser tab and leaving the full-screen view look the same.
 
         Before this was fixed, every such disconnection printed a full stack trace to the
         hub's console — that is, it taught whoever watched to ignore their own log.

@@ -47,7 +47,7 @@ ma lądować wyłącznie hub (§12.2). The simulator run by hand is now a projec
 | Dostęp do modelu z RX | **niezmienny snapshot, copy-on-write** | prostsze niż lock i przy okazji szybsze |
 | Nadawanie | **każdy wątek nadaje sam, bez wątku TX** | `send()` pojedynczej ramki jest niepodzielny; wątek TX dokładałby kolejkę bez zysku |
 | Trwałość | **SQLite, zapis z opóźnieniem** | baza nigdy nie leży na ścieżce ramki |
-| Adaptery | **CLI → REST → MQTT**, wszystkie nad jednym API rdzenia | §10.2 — CLI nie wymaga ani serwera, ani brokera |
+| Adaptery | **klient w terminalu → REST → MQTT**, wszystkie nad jednym API rdzenia | §10.2 — pierwszy nie wymagał ani serwera, ani brokera; dziś w terminalu jest tylko widok pełnoekranowy, powłoki nie ma (§10.3) |
 | Serwer API | **biblioteka standardowa**, `ThreadingHTTPServer` (**H7**) | zero zależności na RPi; czy tak zostaje — `zadania/CR-03.md` |
 | API rdzenia | **pakiet `api/`: kontrakt osobno, implementacja ładowana leniwie** | klient chodzącego huba nie ładuje rdzenia; pilnuje `tests/test_boundaries.py` (§12) |
 | Druga strona w testach | **atrapa węzła w `tests/node/`**, poza paczką | na Raspberry Pi ma lądować wyłącznie hub; the simulator run by hand is `../lagun-sim`, a separate project |
@@ -646,7 +646,7 @@ i **adaptery**, z których każdy tłumaczy ten sam zestaw operacji na inny spos
                      │                              │
               ┌──────▼──────┐  ┌──────▼──────┐  ┌───▼─────────┐
               │  adapter    │  │  adapter    │  │  adapter    │
-              │    CLI      │  │    REST     │  │    MQTT     │
+              │    TUI      │  │    REST     │  │    MQTT     │
               └─────────────┘  └─────────────┘  └─────────────┘
 ```
 
@@ -660,82 +660,50 @@ potem drugi adapter, a podział pakietów **dopiero po drugim** — wtedy granic
 odkrywa, a nie zgaduje. Pakiety przestawione po pierwszym adapterze trzeba by
 przestawiać drugi raz.
 
-### 10.2 Dlaczego CLI jest pierwszym adapterem
+### 10.2 Pierwszy był klient w terminalu
 
-| Powód | |
-|---|---|
-| **nie potrzebuje niczego** | ani serwera, ani brokera, ani uwierzytelniania; adapter, który da się napisać w jedno popołudnie |
-| **wymusza API, zanim powstanie transport** | pytania „jak nazwać operację" i „co zwraca" padają raz, a nie przy trzecim adapterze |
-| **da się testować bez procesu** | `main(["nodes"])` w teście; REPL-a i brokera tak nie przetestujesz |
-| **jest narzędziem rozruchu** | pierwsze wpięcie węzła do prawdziwej magistrali chce się zrobić z wiersza poleceń, a nie przez przeglądarkę |
+Pierwszym adapterem była powłoka `lagun-hub shell` — bo nie potrzebowała ani brokera, ani
+przeglądarki, a przede wszystkim **wymusiła API, zanim powstał transport**: pytania „jak
+nazwać operację" i „co zwraca" padły raz, a nie przy trzecim adapterze. Z tamtego czasu
+zostały dwie reguły, które obowiązują dalej:
 
-### 10.3 CLI jest powłoką, i tylko powłoką
+- **hub jest programem serwerowym, a klient w terminalu jest jego klientem** — dołącza
+  się do chodzącego huba przez HTTP i nigdy nie startuje własnego (dwa huby na jednej
+  magistrali to dwa przydziały adresów i dwie prawdy),
+- **operacje zwracają dane, nie napisy** — `HubClient` oddaje te same zamrożone
+  dataclassy, które wystawia `api/views.py`, a tekst robi z nich dopiero widok.
 
-Pierwsza wersja tego rozdziału opisywała **dwie postacie** adaptera — powłokę
-`lagun-hub shell` i polecenia jednorazowe `lagun-hub nodes` — nad wspólną listą poleceń.
-Obie odpadły razem z założeniem, na którym stały: że CLI startuje **własny** hub
-w swoim procesie.
+### 10.3 Powłoki nie ma — w terminalu jest widok pełnoekranowy
 
-Dziś hub jest programem serwerowym, a CLI jest jego **klientem** (§10.2). To zmienia
-rachunek, bo polecenie jednorazowe nad zdalnym hubem jest już tylko `curl`-em z ładniejszym
-formatowaniem — cały zysk, jaki miało (skrypty, CI), da się mieć wprost z REST-a.
-Powłoka daje za to trzy rzeczy, których jednorazowe polecenie nie da **z definicji**:
+Do 2026-10 nad tym samym klientem stały dwa interfejsy: powłoka (REPL z uzupełnianiem)
+i widok pełnoekranowy (§10.3.3). Powłoka została usunięta
+([`CR-06`](../zadania/zrobione/CR-06.md)). Widok robi każdą operację, którą miała,
+a utrzymywanie dwóch klientów kosztowało przy każdej zmianie API drugie poprawki, drugie
+testy i drugą dokumentację.
 
-| | |
-|---|---|
-| **obserwacja** | model narasta w trakcie sesji; widać, jak węzeł wchodzi, jak się enumeruje i co przy tym rozjeżdża się z konfiguracją |
-| **podgląd ruchu** | strumień zdarzeń ma sens tylko tam, gdzie ktoś patrzy dłużej niż sekundę |
-| **uzupełnianie** | tabulator nad **żywą instalacją**, a nie nad listą przepisaną do CLI |
-
-Trzeci wiersz jest zapłatą za regułę „operacje zwracają dane, nie napisy". `EndpointView`
-niesie listę komend, listę atrybutów i `choices` dla każdego z nich — więc powłoka umie
-uzupełnić `cmd kitchen-relay 4 Tog⇥` na `Toggle`, a `set … Purpose ⇥` na listę wartości,
-**nie wiedząc o typie `Output` niczego**. Cokolwiek dojdzie do katalogu typów, uzupełnianie
-zna to tego samego dnia.
+**Odrzucona alternatywa: zostawić obie.** Powłoka miała jedną przewagę, której widok nie
+powtarza — tabulator nad żywą instalacją. Widok jej nie potrzebuje, bo wartości nazwane
+**wybiera się z listy** (`choices` z `EndpointView`), a nie wpisuje. Strumień zdarzeń
+(`watch`, `feed`) też nie przepadł: dolny panel widoku pokazuje ramki, a stan widać
+w listach (§10.3.3). `GET /events` zostaje w API — dla `curl` i dla MQTT.
 
 ```
-lagunhub/adapters/cli/
-├── client.py      HTTP + SSE do huba                 ← jedyne miejsce z transportem
-├── commands.py    do_nodes(api, args) -> NodeTable   ← treść: DANE, nie tekst
-├── render.py      render(NodeTable) -> str           ← tekst
-└── shell.py       pętla REPL, uzupełnianie, podgląd
+lagunhub/adapters/client/
+└── client.py      HubClient (HTTP + SSE), discover(), protokół Hub  ← jedyne miejsce z transportem
 ```
 
-> **Polecenie zwraca dane, nie napis.** Rozdzielenie kosztuje jeden plik teraz,
-> a oszczędza przepisywanie wszystkiego w chwili, gdy dojdzie drugi sposób pokazywania
-> tych samych rzeczy (§10.3.3). Adapter, który zwraca gotowy tekst, zmusza każdy kolejny
-> widok do parsowania cudzego wypisu.
+`Hub` to protokół, który spełniają i `HubApi`, i `HubClient` — dlatego widok testuje się
+na atrapie (`tests/fake_hub.py`), a `tests/test_client.py` pilnuje, żeby obie strony się
+nie rozjechały.
 
-Testuje się `commands.py` — bez procesu, bez portu i bez terminala; asercje idą na
-strukturach, a nie na formatowaniu. `render.py` i powłoka zostają cienkie na tyle,
-że nie ma w nich czego testować.
+**Czego klient w terminalu nie załatwi.** *Automatyzacji* — do skryptów i CI jest REST
+(`curl`, przykłady w [`README.md`](README.md)). *Huba, który nie odpowiada* — klient nie ma
+wtedy z czym rozmawiać; diagnostyka schodzi poziom niżej, do `lagun-hub monitor`, który
+słucha magistrali i huba nie potrzebuje wcale. **Rozruch na Raspberry Pi przez SSH** tego
+nie wymaga: `lagun-hub run --accept-new`, `doctor`, `monitor`, widok (`curses` jest
+w bibliotece standardowej i działa w każdym terminalu SSH) i `curl`.
 
-Polecenia jednorazowe **wrócą tanio, gdyby się okazały potrzebne** — dokładnie dlatego,
-że treść siedzi w `commands.py`, a nie w powłoce. Dopisanie `argv.py` to wtedy jeden plik,
-a nie przepisywanie adaptera.
-
-### 10.3.1 Strumień zdarzeń nie może walczyć z zachętą
-
-Jedyna rzecz, która w powłoce psuje się sama z siebie: ruch wypisywany w tle nadpisuje
-wiersz, który człowiek właśnie pisze.
-
-Dwa środki, oba proste:
-
-- **podgląd jest domyślnie wyłączony** — `feed on` włącza go świadomie, a `watch`
-  strumieniuje do `Ctrl-C` i wtedy zachęty nie ma w ogóle,
-- przy włączonym podglądzie wiersz wypisuje się **przez `readline`**, który sam odtwarza
-  zachętę i to, co było w niej wpisane.
-
-### 10.3.2 Czego powłoka nie załatwi
-
-**Automatyzacji.** Nie ma trybu jednorazowego, więc nie ma czego wpiąć w skrypt ani
-w CI — do tego jest REST i będzie nim, dopóki ktoś nie pokaże, że mu to przeszkadza.
-
-**Sterowania hubem, który nie odpowiada.** Powłoka jest klientem: gdy serwer huba nie
-wstaje, nie ma z czym rozmawiać. Diagnostyka schodzi wtedy na poziom niżej — `lagun-hub
-monitor`, który słucha magistrali i **nie potrzebuje huba wcale**.
-
-### 10.3.3 Druga postać: powłoka pełnoekranowa
+### 10.3.3 Widok pełnoekranowy
 
 Podział ekranu — u góry nawigacja, na dole ruch na magistrali — jest naturalnym
 następnym krokiem i **wolno w nim poszaleć właśnie dlatego, że to adapter**. Cokolwiek
@@ -782,10 +750,9 @@ najwolniejszy widok staje się wąskim gardłem huba.
 własną pętlę `asyncio`; obowiązuje ją dokładnie ta sama umowa co każdy adapter — czyta
 widok przez kolejkę CORE i tą samą kolejką odsyła komendy (§10.7). Nic więcej.
 
-> **Najlepszy moment na to jest po powłoce, nie przed.** Widok pełnoekranowy stoi na
-> tym samym kliencie i na tym samym `commands.py`, więc zbudowany później jest w dużej
-> części gotowy. Zbudowany wcześniej byłby jedynym konsumentem obu i wyznaczyłby ich
-> kształt pod siebie — a chcemy odwrotnie.
+> **Widok powstał po powłoce, nie przed** — i dobrze: stanął na kliencie, który już
+> był, więc był w dużej części gotowy. Zbudowany wcześniej byłby jedynym konsumentem
+> klienta i wyznaczyłby jego kształt pod siebie.
 
 **Szczegóły obok listy, nie w głąb.** Pierwsza wersja widoku schodziła w głąb: człowiek
 wchodził w węzeł i tracił z oczu resztę instalacji, wchodził w endpoint i tracił z oczu
@@ -818,8 +785,8 @@ w czasie (`Latency` trzyma próbki, nie szereg).
 
 | Powód | |
 |---|---|
-| **wymaga ustalonego modelu** | rozgłaszanie do HA każe rozstrzygnąć kanał → encja, `Purpose`, cechy, kształt tematów; CLI i REST nie wymagają niczego poza `api.py` |
-| **najtrudniej sprawdzić, czy działa** | trzeba brokera, klienta HA i czytania cudzych tematów; `curl` i powłoka mówią prawdę od razu |
+| **wymaga ustalonego modelu** | rozgłaszanie do HA każe rozstrzygnąć kanał → encja, `Purpose`, cechy, kształt tematów; REST i widok nie wymagają niczego poza `api.py` |
+| **najtrudniej sprawdzić, czy działa** | trzeba brokera, klienta HA i czytania cudzych tematów; `curl` i widok mówią prawdę od razu |
 | **nie zastępuje pozostałych** | zostają jako kanał obsługowy i diagnostyczny, także wtedy, gdy broker leży |
 
 Jest w tym jeszcze jeden zysk, mniej oczywisty: **dwa wcześniejsze adaptery zmuszają do
@@ -1020,8 +987,8 @@ hub/                         ← repozytorium
 │   │   └── hub.py           HubApi: operacje i droga do CORE
 │   ├── adapters/
 │   │   ├── http/            serwer huba: REST + SSE, token
-│   │   ├── cli/             klient, polecenia, rysowanie, powłoka
-│   │   ├── tui/             widok pełnoekranowy nad tym samym klientem
+│   │   ├── client/          klient chodzącego huba: HTTP + SSE, protokół Hub
+│   │   ├── tui/             widok pełnoekranowy nad tym klientem
 │   │   └── mqtt/            Home Assistant — §14.2
 │   ├── monitor.py           podgląd ruchu i modelu
 │   └── cli.py               wiersz poleceń
@@ -1041,12 +1008,12 @@ byłby to dowód, że coś jest po złej stronie. Dzień, w którym warto wydzie
 innego.
 
 Granica między `core/` a `adapters/` jest natomiast **wciąż zgadywana** — dostała
-pierwszego konsumenta w serwerze huba, drugiego w powłoce. Dlatego `api/` leży obok,
+pierwszego konsumenta w serwerze huba, drugiego w kliencie w terminalu. Dlatego `api/` leży obok,
 a nie w żadnym z nich.
 
 Od cleanupu przed wersją 0.5 `api/` jest pakietem, podzielonym wedle tego, co od czego
 zależy: `errors.py` i `views.py` to **kontrakt** i nie importują niczego z `core/`,
-`hub.py` to implementacja. Klient chodzącego huba (powłoka, widok) potrzebuje wyłącznie
+`hub.py` to implementacja. Klient chodzącego huba (widok) potrzebuje wyłącznie
 kontraktu i dzięki temu nie ładuje rdzenia — pilnuje tego `tests/test_boundaries.py`.
 `lagunhub/api/__init__.py` ładuje `hub.py` leniwie, bo inaczej samo `import
 lagunhub.api.views` ciągnęłoby rdzeń przez paczkę nadrzędną.
@@ -1158,7 +1125,7 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 
 ### 14.2 Adapter MQTT i Home Assistant
 
-- `adapters/mqtt/` nad tym samym API — **nie zastępuje serwera ani powłoki**, dokłada się,
+- `adapters/mqtt/` nad tym samym API — **nie zastępuje serwera ani widoku**, dokłada się,
 - jednostką prezentacji jest **kanał**, nie węzeł i nie endpoint
   ([`01-model-danych.md`](../lagunbus-spec/01-model-danych.md) §5.3); przekaźnik 4×
   z pomiarem prądu to 4 encje kanałowe i jedna temperatura, nie 9 bytów,
@@ -1188,6 +1155,14 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
   ([`07-hub.md`](../lagunbus-spec/07-hub.md) §5.3),
 - usunięcie węzła, `FactoryReset`, stan `RETIRED`; kopia katalogu konfiguracji.
 
+### 14.5 Widok
+
+- **listy odświeżane zdarzeniem, nie co 2 s.** Dziś widok przeładowuje je od razu tylko po
+  własnych akcjach; zmiana z instalacji (węzeł wchodzi, klik, raport) dociera najwyżej
+  dwie sekundy później, bo dolny panel czyta `frames()`, a nie `stream()`. Słuchanie
+  `GET /events` i przeładowanie na zdarzenie zrobiłoby z odpytywania siatkę
+  bezpieczeństwa (`REFRESH` w [`adapters/tui/state.py`](lagunhub/adapters/tui/state.py)).
+
 ---
 
 ## 15. Czego świadomie nie robimy
@@ -1200,4 +1175,4 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 | Grupy i sceny zapisywane do węzłów | konfiguracja je opisuje, uzgadnianie przepisuje na razie tylko atrybuty; `GetMembership` jest segmentowane, a scen hub nie umie odczytać |
 | Zabezpieczenie kryptograficzne magistrali | rozstrzygnięte przeciw w specyfikacji |
 | Optymalizacja ścieżki szybkiej poniżej milisekundy | budżet jest luźny; wracamy, gdy pomiar da powód (§5.1) |
-| Polecenia jednorazowe w CLI | powłoka jest jedynym wejściem, dopóki ktoś nie pokaże, że mu ich brakuje (§10.3) |
+| Polecenia jednorazowe w CLI | do skryptów jest REST; w terminalu jest tylko widok, dopóki ktoś nie pokaże, że mu ich brakuje (§10.3) |

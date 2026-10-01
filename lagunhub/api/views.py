@@ -2,7 +2,7 @@
 
 Frozen dataclasses of plain values, ready to go through `json.dumps` without a translator.
 **This module depends on nothing in `core/`**, and a test watches that: a client of a
-running hub (the shell, the full-screen view) needs these shapes to assemble answers, and
+running hub (the full-screen view) needs these shapes to assemble answers, and
 must be able to have them without pulling in the CORE thread, the configuration store and
 the binding engine.
 """

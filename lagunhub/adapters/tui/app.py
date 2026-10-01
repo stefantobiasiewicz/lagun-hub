@@ -7,9 +7,9 @@ that settled **H7** on the server. The question of an optional dependency disapp
 along the way: there is none at all.
 
 This file **knows nothing about the hub** beyond `State`, and `State` talks to it through
-the same client as the shell. [`panes.py`](panes.py) makes the panes’ content and
-[`screen.py`](screen.py) draws it — so one can be checked without a terminal and the
-other with a mock screen.
+the hub client ([`adapters/client/`](../client/client.py)). [`panes.py`](panes.py) makes
+the panes’ content and [`screen.py`](screen.py) draws it — so one can be checked without a
+terminal and the other with a mock screen.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import locale
 from collections.abc import Callable
 from typing import Any, Final
 
-from lagunhub.adapters.cli.commands import Hub
+from lagunhub.adapters.client.client import Hub
 from lagunhub.adapters.tui import actions, overlay, screen
 from lagunhub.adapters.tui.state import Section, State
 from lagunhub.api import ApiError, AttributeView, DiffRow, EndpointView, JoinView, NodeSummary

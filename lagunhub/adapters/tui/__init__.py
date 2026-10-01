@@ -1,4 +1,4 @@
-"""The full-screen view, over the same client as the shell."""
+"""The full-screen view — the hub's client in a terminal."""
 
 from lagunhub.adapters.tui.app import main, run
 

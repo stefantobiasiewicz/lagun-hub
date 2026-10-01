@@ -291,7 +291,7 @@ class _Listener(ThreadingHTTPServer):
 
     By default a broken connection prints a full stack trace to the console — and a
     broken connection is a **normal ending** here: that is what a closed browser tab
-    looks like and what leaving the shell looks like. A hub that prints twenty lines on
+    looks like and what leaving the full-screen view looks like. A hub that prints twenty lines on
     every such event teaches whoever is watching to ignore its log.
     """
 

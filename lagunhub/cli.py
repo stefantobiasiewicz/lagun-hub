@@ -14,8 +14,8 @@ import time
 from pathlib import Path
 
 from lagunhub import __version__, doctor, scaffold
-from lagunhub.adapters.cli import Shell, discover
-from lagunhub.adapters.cli.client import TOKEN_ENV
+from lagunhub.adapters.client import discover
+from lagunhub.adapters.client.client import TOKEN_ENV
 from lagunhub.adapters.http import HubServer
 from lagunhub.adapters.http.auth import TOKEN_FILE, TokenError
 from lagunhub.api import ApiError, HubApi
@@ -133,7 +133,7 @@ def _serve(
     core.start()
     if accept_new:
         # On the CORE thread, like every change to the model. It expires by itself,
-        # as when opened from the shell.
+        # as when opened from the full-screen view.
         core.submit(core.commissioning.accept_new)
         print("accepting new nodes — the mode closes by itself after 15 min", flush=True)
     server = _start_api(core, engine, api_config, where)
@@ -225,10 +225,10 @@ def _doctor(config: Path) -> int:
     return code
 
 
-def _client(form: str, config: Path, url: str | None, token: str | None) -> int:
-    """The shell and the view do not start a hub — they **attach to a running one**.
+def _tui(config: Path, url: str | None, token: str | None) -> int:
+    """The full-screen view does not start a hub — it **attaches to a running one**.
 
-    If they started their own, they would be a second hub on the same bus: two address
+    If it started its own, it would be a second hub on the same bus: two address
     assignments, two reconciliations, two truths
     ([`ARCHITEKTURA.md`](ARCHITEKTURA.md) §10.3).
     """
@@ -238,11 +238,9 @@ def _client(form: str, config: Path, url: str | None, token: str | None) -> int:
     except ApiError as exc:
         print(f"cannot connect: {exc.message}", file=sys.stderr)
         return 2
-    if form == "tui":
-        from lagunhub.adapters.tui import run as tui_run
+    from lagunhub.adapters.tui import run as tui_run
 
-        return tui_run(conn)
-    return Shell(conn).loop()
+    return tui_run(conn)
 
 
 def _start_api(
@@ -298,8 +296,8 @@ def _open_buses(channels: list[str], udp: str | None) -> list[Bus]:
 def _ephemeral_config(source: Path | None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
     """A configuration in a temporary directory, removed when the hub stops.
 
-    With a source it is a COPY — the hub writes to its configuration (the API and the
-    shell's `set` go to the file), and a trial run must not leave traces in a real one.
+    With a source it is a COPY — the hub writes to its configuration (configuration
+    writes through the API go to the file), and a trial run must not leave traces in a real one.
     Without a source it is a clean one from `init`. Raises `scaffold.InitError` or
     `OSError`.
     """
@@ -351,11 +349,6 @@ def main(argv: list[str] | None = None) -> int:
         metavar="GROUP[:PORT]",
         help=f"watch the UDP bus of simulated nodes instead (default {UDP_DEFAULT})",
     )
-
-    shell = sub.add_parser("shell", help="the shell: a client of a running hub")
-    shell.add_argument("--config", type=Path, default=default_config())
-    shell.add_argument("--url", default=None, help="by default from config/hub.yaml")
-    shell.add_argument("--token", default=None, help=f"by default from ${TOKEN_ENV} or from a file")
 
     tui = sub.add_parser("tui", help="the full-screen view: arrows instead of typing")
     tui.add_argument("--config", type=Path, default=default_config())
@@ -413,8 +406,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         return _doctor(args.config)
 
-    if args.command in ("shell", "tui"):
-        return _client(args.command, args.config, args.url, args.token)
+    if args.command == "tui":
+        return _tui(args.config, args.url, args.token)
 
     if args.command == "monitor":
         try:
@@ -436,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         origin = f"a copy of {args.config or os.environ[CONFIG_ENV]}" if named else "clean"
         print(f"temporary configuration ({origin}), removed on exit: {where}", flush=True)
-        print(f"   the shell:  lagun-hub shell --config {where}", flush=True)
+        print(f"   the view:  lagun-hub tui --config {where}", flush=True)
     try:
         return _run(args, where)
     finally:

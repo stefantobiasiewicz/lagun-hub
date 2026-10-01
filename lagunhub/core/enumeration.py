@@ -234,11 +234,11 @@ class Enumerator:
         """System endpoints are **inserted, not polled** (01-model-danych.md §1.2).
 
         The specification fixes the numbers and types, so asking about them would be
-        asking about something already known. Before the shell the hub simply **did not
-        have them in the model** — it knew the contents of `Device`, because it had read
-        them, but had nowhere to put them. The effect only showed on an attempt to use
-        it: `cmd <node> ep0 Reboot` answered "there is no ep0", while
-        `ep1 ResetCounters` and all group handling on `ep2` were out of reach.
+        asking about something already known. Before the shell (an early client, since
+        removed) the hub simply **did not have them in the model** — it knew the contents
+        of `Device`, because it had read them, but had nowhere to put them. The effect only
+        showed on an attempt to use it: `cmd <node> ep0 Reboot` answered "there is no
+        ep0", while `ep1 ResetCounters` and all group handling on `ep2` were out of reach.
 
         `ep3` is the only conditional one, and its condition is derivable from the
         descriptor too: scenes exist if and only if the node has some `Output`.

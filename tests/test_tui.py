@@ -30,7 +30,7 @@ from lagunhub.api import (
     TargetView,
     TrafficView,
 )
-from tests.test_shell import EP4, RELAY, FakeHub
+from tests.fake_hub import EP4, RELAY, FakeHub
 
 
 @pytest.fixture
@@ -253,7 +253,7 @@ class TestContextKeys:
 
 class TestTraffic:
     def test_a_row_carries_direction_kind_and_time(self) -> None:
-        from tests.test_shell import TRAFFIC
+        from tests.fake_hub import TRAFFIC
 
         command, response = (
             panes.traffic_row(TRAFFIC[0])[0],
@@ -264,7 +264,7 @@ class TestTraffic:
         assert "RESPONSE" in response and "OK" in response and "3.1 ms" in response
 
     def test_a_refusal_is_red(self) -> None:
-        from tests.test_shell import TRAFFIC
+        from tests.fake_hub import TRAFFIC
 
         assert panes.traffic_row(TRAFFIC[1])[1] == panes.NORMAL
         assert panes.traffic_row(TRAFFIC[2])[1] == panes.BAD, "BUSY is a refusal"
