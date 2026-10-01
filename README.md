@@ -22,8 +22,10 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
 ```
 
-Wymaga Pythona 3.12+. Na Linuksie wszystko działa na prawdziwym SocketCAN;
-na macOS dostępna jest magistrala wirtualna, która udaje także arbitraż.
+Requires Python 3.12+. On Linux the hub runs on real SocketCAN (`can0`, `vcan0`). On
+macOS there is no SocketCAN: run it with `--udp`, next to simulated devices — see
+[Without hardware](#without-hardware-simulated-devices). The tests run anywhere, on a
+virtual bus that fakes arbitration too.
 
 ## W PyCharmie
 
@@ -39,6 +41,10 @@ Potem w liście konfiguracji są gotowe pozycje:
 
 | | Co uruchamia |
 |---|---|
+| **0 · Stack: hub + simulators** | everything below at once: 1, 3a and 3b — the whole installation without hardware |
+| **1 · Hub (UDP, simulators)** | `lagun-hub run --udp --ephemeral --accept-new --config config` — on a temporary copy of `config/` |
+| **3a · Sim: kitchen-relay** | `lagun-sim output --channels 8` as `kitchen-relay` (`08090a0b0c0d0e0f`), fresh every run |
+| **3b · Sim: test key** | `lagun-sim key --channels 4` as `test` (`a201020304050607`), bound to the relay in `config/bindings.yaml` |
 | **2 · Shell** | `lagun-hub shell` przeciwko chodzącemu hubowi |
 | **2b · Full-screen view** | widok pełnoekranowy, też przeciwko chodzącemu hubowi |
 | **4 · Identifier registry** | tabela identyfikatorów, jaką hub widzi |
@@ -47,15 +53,45 @@ Potem w liście konfiguracji są gotowe pozycje:
 Powłoka i widok **nie startują huba — dołączają się do chodzącego**, więc hub musi już
 pracować (`lagun-hub run`). Obie mają włączone *Emulate terminal in output console*,
 bo obie czytają z klawiatury; bez tego PyCharm nie przepuści wpisywania, a powłoce nie
-zadziała tabulator.
+zadziała tabulator. The simulators (3a, 3b) need it too — each is a terminal view — and
+their interpreter is `../lagun-sim/.venv`, installed as in
+[`../lagun-sim/README.md`](../lagun-sim/README.md).
 
-### Co warto zobaczyć
+### Without hardware: simulated devices
 
-Przed wersją 0.5 służyło do tego `lagun-sim demo`: jeden proces z klawiszem, przekaźnikiem
-i hubem. Symulator wyszedł z huba (patrz [Czym hub rozmawia w testach](#czym-hub-rozmawia-w-testach)),
-więc **dziś huba ogląda się albo na prawdziwych urządzeniach**
-([`../devices/`](../devices/)), albo w testach — te same ścieżki, tylko bez czekania
-na zegar:
+The hub and [`lagun-sim`](../lagun-sim/) — one process per device, running the node
+library's C code, the same as on a board — on one machine, over UDP multicast instead of
+CAN (zadania/zrobione/FEAT-02.md):
+
+```sh
+.venv/bin/lagun-hub run --udp --ephemeral --accept-new --config config    # window 1
+
+cd ../lagun-sim                                                             # windows 2, 3
+.venv/bin/lagun-sim output --uid 08090a0b0c0d0e0f --name kitchen-relay
+.venv/bin/lagun-sim key    --uid 0001020304050607 --name kitchen-switch
+
+.venv/bin/lagun-hub tui --config <the path the hub printed>                # window 4
+```
+
+The devices join, the hub enumerates and reconciles them, and `1` in the key's window
+toggles the relay through the binding in `config/bindings.yaml`. Or start **0 · Stack**
+in PyCharm.
+
+| | |
+|---|---|
+| `--udp [GROUP[:PORT]]` | **test only**: one bus over UDP multicast on this machine (default `239.255.76.66:7607`) instead of the buses in `hub.yaml`. Deliberately not a kind of bus in the file — a house configuration cannot point at it by mistake. No arbitration between processes: frames arrive in the order they were sent. Format: `../lagunbus-node/README.md` § Decisions |
+| `--ephemeral` | work on a temporary copy of the configuration (a clean one without `--config`), removed on exit — what the API writes does not land in your files |
+| `--accept-new` | open the accepting mode at start, as `accept_new: true` in `hub.yaml` does |
+| `monitor --udp` | watch that bus without running a hub |
+
+A simulated device can be broken on purpose — `f` in its window: lose the next response,
+answer `BUSY`, fall silent for 10 s, lose a segment. The device's log does not show what
+the overlay did in its name (a `BUSY` never reaches the node); the hub does — `health`
+and the transaction counters at exit.
+
+### Co warto zobaczyć w testach
+
+Te same ścieżki, tylko bez czekania na zegar:
 
 | Co chcesz zobaczyć | Gdzie |
 |---|---|
@@ -627,8 +663,18 @@ Startują **bez adresu** i zgłaszają się same. W widoku: klawisz `[a]` otwier
 przyjmowanie, po chwili pojawiają się na liście. Nadaj im aliasy (`[N]`), zwiąż
 klawisz z przekaźnikiem (`[+]` w sekcji Powiązania) — i to jest cała ścieżka.
 
-> Symulowanych węzłów do uruchamiania z ręki na razie nie ma — wyszły z huba, bo na RPi
-> ma lądować wyłącznie hub; wrócą jako oddzielny projekt (`zadania/FEAT-02.md`).
+Without boards, the other side can be [`lagun-sim`](../lagun-sim/) on the same `vcan0`
+— installed next to the hub's clone, never inside it (only the hub goes onto the RPi as a
+package):
+
+```bash
+lagun-sim output --bus vcan0      # 3 — and 4, 5 … one device each
+lagun-sim key --bus vcan0
+```
+
+`--udp` works on Linux too, but the loopback interface often comes without multicast
+(`ip link show lo` — no `MULTICAST` flag); `sudo ip link set lo multicast on` fixes it.
+**Not tried on an RPi yet** — `vcan0` is the tested way there.
 
 ---
 
@@ -712,8 +758,10 @@ odpowiedzi i segmentów, `BUSY`, cisza). Przed wersją 0.5 był to symulator pak
 z hubem — wyszedł z paczki, bo na Raspberry Pi ma lądować **wyłącznie hub**.
 
 Czego atrapa nie robi: nie ma pamięci trwałej, nie zmienia adresu po `SetAddress`
-i nie da się jej uruchomić osobno. Symulator do uruchamiania z ręki będzie osobnym
-projektem obok tych repozytoriów.
+i nie da się jej uruchomić osobno. For that there is [`lagun-sim`](../lagun-sim/), next
+to these repositories: the node library's C code behind a terminal view, run by hand
+next to a hub — see [Without hardware](#without-hardware-simulated-devices). The double
+here stays: it is a test tool, with a clock the test drives.
 
 ### Rejestr ma się zgadzać ze specyfikacją
 

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import queue
+import shutil
 import signal
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -17,7 +20,7 @@ from lagunhub.adapters.http import HubServer
 from lagunhub.adapters.http.auth import TOKEN_FILE, TokenError
 from lagunhub.api import ApiError, HubApi
 from lagunhub.core.bindings import BindingEngine
-from lagunhub.core.config import ApiConfig, ConfigError, default_config, load
+from lagunhub.core.config import CONFIG_ENV, ApiConfig, ConfigError, default_config, load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.hub import CoreThread
@@ -25,8 +28,11 @@ from lagunhub.core.model import Installation, Snapshot
 from lagunhub.core.rx import ColdItem, Received, RxThread, Sent, Task
 from lagunhub.monitor import format_frame, format_installation
 from lagunhub.protocol import registry
-from lagunhub.protocol.bus import SocketCanBus
+from lagunhub.protocol.bus import SocketCanBus, UdpBus
 from lagunhub.protocol.bus.base import Bus
+from lagunhub.protocol.bus.udp import DEFAULT_GROUP, DEFAULT_PORT, parse_address
+
+UDP_DEFAULT = f"{DEFAULT_GROUP}:{DEFAULT_PORT}"
 
 
 def _print_registry() -> None:
@@ -86,6 +92,7 @@ def _serve(
     api_config: ApiConfig | None = None,
     config_store: ConfigStore | None = None,
     feed: bool | None = None,
+    accept_new: bool = False,
 ) -> int:
     """Start the hub and show the traffic. The threads work alongside and do not wait for
     the printing.
@@ -124,6 +131,11 @@ def _serve(
 
     rx.start()
     core.start()
+    if accept_new:
+        # On the CORE thread, like every change to the model. It expires by itself,
+        # as when opened from the shell.
+        core.submit(core.commissioning.accept_new)
+        print("accepting new nodes — the mode closes by itself after 15 min", flush=True)
     server = _start_api(core, engine, api_config, where)
 
     # `Ctrl-C` is SIGINT, but `kill` from a second terminal and closing a `tmux` session
@@ -268,6 +280,47 @@ def _start_api(
     return server
 
 
+def _open_buses(channels: list[str], udp: str | None) -> list[Bus]:
+    """SocketCAN for the channels, or ONE bus over UDP multicast with `--udp`.
+
+    `--udp` is for running the hub with simulated nodes (`lagun-sim`) — on macOS it is
+    the only way to run the hub at all. It is a switch on the command line and not a
+    kind of bus in `hub.yaml`, on purpose: a house configuration cannot point at it by
+    mistake (zadania/zrobione/FEAT-02.md, N2a). Raises `ValueError` / `OSError` / `RuntimeError`
+    with a message fit for a person.
+    """
+    if udp is not None:
+        group, port = parse_address(udp)
+        return [UdpBus(group, port)]
+    return [SocketCanBus(channel) for channel in channels]
+
+
+def _ephemeral_config(source: Path | None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
+    """A configuration in a temporary directory, removed when the hub stops.
+
+    With a source it is a COPY — the hub writes to its configuration (the API and the
+    shell's `set` go to the file), and a trial run must not leave traces in a real one.
+    Without a source it is a clean one from `init`. Raises `scaffold.InitError` or
+    `OSError`.
+    """
+    temporary = tempfile.TemporaryDirectory(prefix="lagun-hub-")
+    root = Path(temporary.name)
+    try:
+        if source is None:
+            where = root / "config"
+            scaffold.init(where, channel="vcan0")
+        elif source.is_dir():
+            where = root / "config"
+            shutil.copytree(source, where, ignore=shutil.ignore_patterns("*.tmp"))
+        else:
+            where = root / source.name
+            shutil.copy2(source, where)
+    except BaseException:
+        temporary.cleanup()
+        raise
+    return temporary, where
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lagun-hub", description="A LagunBus installation hub")
     parser.add_argument("--version", action="version", version=f"lagun-hub {__version__}")
@@ -286,7 +339,18 @@ def main(argv: list[str] | None = None) -> int:
     check_cmd.add_argument("--config", type=Path, default=default_config())
 
     monitor = sub.add_parser("monitor", help="a traffic preview; it carries out no bindings")
-    monitor.add_argument("--bus", action="append", default=None, help="may be given several times")
+    monitor_source = monitor.add_mutually_exclusive_group()
+    monitor_source.add_argument(
+        "--bus", action="append", default=None, help="may be given several times"
+    )
+    monitor_source.add_argument(
+        "--udp",
+        nargs="?",
+        const=UDP_DEFAULT,
+        default=None,
+        metavar="GROUP[:PORT]",
+        help=f"watch the UDP bus of simulated nodes instead (default {UDP_DEFAULT})",
+    )
 
     shell = sub.add_parser("shell", help="the shell: a client of a running hub")
     shell.add_argument("--config", type=Path, default=default_config())
@@ -299,8 +363,32 @@ def main(argv: list[str] | None = None) -> int:
     tui.add_argument("--token", default=None, help=f"by default from ${TOKEN_ENV} or from a file")
 
     run = sub.add_parser("run", help="start the hub with a configuration")
-    run.add_argument("--config", type=Path, default=default_config())
-    run.add_argument("--bus", action="append", default=None, help="overrides buses from the file")
+    # `None` means "not given", which `--ephemeral` needs to tell apart from the default.
+    run.add_argument("--config", type=Path, default=None, help="by default ./config")
+    run_source = run.add_mutually_exclusive_group()
+    run_source.add_argument(
+        "--bus", action="append", default=None, help="overrides buses from the file"
+    )
+    run_source.add_argument(
+        "--udp",
+        nargs="?",
+        const=UDP_DEFAULT,
+        default=None,
+        metavar="GROUP[:PORT]",
+        help="TEST ONLY: one bus over UDP multicast on this machine instead of CAN — for "
+        f"simulated nodes (lagun-sim); default {UDP_DEFAULT}",
+    )
+    run.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help="work on a temporary copy of the configuration (a clean one without --config), "
+        "removed on exit",
+    )
+    run.add_argument(
+        "--accept-new",
+        action="store_true",
+        help="open the accepting mode at start, as `accept_new: true` in hub.yaml",
+    )
     preview = run.add_mutually_exclusive_group()
     preview.add_argument(
         "--feed",
@@ -329,20 +417,55 @@ def main(argv: list[str] | None = None) -> int:
         return _client(args.command, args.config, args.url, args.token)
 
     if args.command == "monitor":
-        channels = args.bus or ["vcan0"]
-        buses: list[Bus] = [SocketCanBus(channel) for channel in channels]
+        try:
+            buses: list[Bus] = _open_buses(args.bus or ["vcan0"], args.udp)
+        except (ValueError, OSError, RuntimeError) as exc:
+            print(f"cannot open the bus: {exc}", file=sys.stderr)
+            return 2
         return _serve(buses, Installation())  # the preview exposes no API
 
+    temporary: tempfile.TemporaryDirectory[str] | None = None
+    where: Path = args.config if args.config is not None else default_config()
+    if args.ephemeral:
+        # A source only when one was named — on the command line or in the variable.
+        named = args.config is not None or bool(os.environ.get(CONFIG_ENV))
+        try:
+            temporary, where = _ephemeral_config(where if named else None)
+        except (scaffold.InitError, OSError) as exc:
+            print(f"cannot prepare a temporary configuration: {exc}", file=sys.stderr)
+            return 2
+        origin = f"a copy of {args.config or os.environ[CONFIG_ENV]}" if named else "clean"
+        print(f"temporary configuration ({origin}), removed on exit: {where}", flush=True)
+        print(f"   the shell:  lagun-hub shell --config {where}", flush=True)
     try:
-        config = load(args.config)
+        return _run(args, where)
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
+
+
+def _run(args: argparse.Namespace, where: Path) -> int:
+    try:
+        config = load(where)
     except ConfigError as exc:
         print(f"the configuration is not valid: {exc}", file=sys.stderr)
         return 2
 
-    channels = args.bus or list(config.channels)
-    buses = [SocketCanBus(channel) for channel in channels]
-    for bus in config.buses:
-        print(f"bus {bus.name} ({bus.channel}) · {bus.bitrate // 1000} kbit/s", flush=True)
+    try:
+        buses = _open_buses(args.bus or list(config.channels), args.udp)
+    except (ValueError, OSError, RuntimeError) as exc:
+        hint = "" if args.udp else " — without CAN on this machine, try --udp"
+        print(f"cannot open the bus: {exc}{hint}", file=sys.stderr)
+        return 2
+    if args.udp:
+        print(
+            f"bus {buses[0].name} (UDP {args.udp}) · TEST ONLY — simulated nodes, "
+            "the buses from the file are not used",
+            flush=True,
+        )
+    else:
+        for bus in config.buses:
+            print(f"bus {bus.name} ({bus.channel}) · {bus.bitrate // 1000} kbit/s", flush=True)
     print(f"bindings: {len(config.bindings)}  nodes in the configuration: {len(config.nodes)}")
     for node in config.nodes:
         print(f"  {node.alias:<18} {node.name or node.uid.hex()}", flush=True)
@@ -350,10 +473,16 @@ def main(argv: list[str] | None = None) -> int:
 
     installation = Installation()
     apply(installation, config)
-    store = ConfigStore(args.config)
-    if config.accept_new:
-        print("accepting mode switched on from the configuration", flush=True)
-    return _serve(buses, installation, args.config, config.api, store, args.feed)
+    store = ConfigStore(where)
+    return _serve(
+        buses,
+        installation,
+        where,
+        config.api,
+        store,
+        args.feed,
+        accept_new=config.accept_new or args.accept_new,
+    )
 
 
 if __name__ == "__main__":

@@ -30,7 +30,9 @@ Skąd hub bierze powiązania, źródła danych, konfigurację endpointów i usta
 
 Drugą stroną kontraktu w testach jest **atrapa węzła** w [`tests/node/`](tests/node/).
 Przed wersją 0.5 był to symulator pakowany razem z hubem; wyszedł z paczki, bo na Raspberry Pi
-ma lądować wyłącznie hub (§12.2).
+ma lądować wyłącznie hub (§12.2). The simulator run by hand is now a project of its own,
+[`../lagun-sim/`](../lagun-sim/), on the node library's C code; it reaches the hub over
+`UdpBus` (§9) and shares no code with it.
 
 ---
 
@@ -48,7 +50,7 @@ ma lądować wyłącznie hub (§12.2).
 | Adaptery | **CLI → REST → MQTT**, wszystkie nad jednym API rdzenia | §10.2 — CLI nie wymaga ani serwera, ani brokera |
 | Serwer API | **biblioteka standardowa**, `ThreadingHTTPServer` (**H7**) | zero zależności na RPi; czy tak zostaje — `zadania/CR-03.md` |
 | API rdzenia | **pakiet `api/`: kontrakt osobno, implementacja ładowana leniwie** | klient chodzącego huba nie ładuje rdzenia; pilnuje `tests/test_boundaries.py` (§12) |
-| Druga strona w testach | **atrapa węzła w `tests/node/`**, poza paczką | na Raspberry Pi ma lądować wyłącznie hub; symulator do uruchamiania z ręki będzie osobnym projektem |
+| Druga strona w testach | **atrapa węzła w `tests/node/`**, poza paczką | na Raspberry Pi ma lądować wyłącznie hub; the simulator run by hand is `../lagun-sim`, a separate project |
 | Źródło identyfikatorów | **`lagunbus-spec/registry/*.yaml`** | generujemy z nich kod, nie przepisujemy ręcznie |
 
 ---
@@ -614,7 +616,8 @@ class Bus(Protocol):
 | Implementacja | Gdzie działa | Do czego |
 |---|---|---|
 | `SocketCanBus` | Linux, `can0` / `vcan0` | RPi i docelowa instalacja |
-| `VirtualBus` | wszędzie | macOS, testy, atrapa węzła ([`tests/node/`](tests/node/)) |
+| `VirtualBus` | wszędzie, w jednym procesie | testy, atrapa węzła ([`tests/node/`](tests/node/)) |
+| `UdpBus` | wszędzie, między procesami | **test only**: `lagun-hub run --udp` next to `lagun-sim` — the only way to run the hub on macOS. Never a kind of bus in `hub.yaml`. No arbitration between processes. Format: `../lagunbus-node/README.md` § Decisions |
 | `ReplayBus` | wszędzie | odtwarzanie zapisanego ruchu, testy regresji |
 
 `VirtualBus` udaje **arbitraż**: przy dwóch ramkach gotowych jednocześnie przepuszcza tę
@@ -1082,8 +1085,13 @@ ma lądować hub i nic więcej. Kod został tam, gdzie jest używany, czyli w te
 Warunek, przy którym to zmieniamy, warto zapisać już teraz: **gdy druga strona zacznie
 potrzebować czegoś, czego hub nie potrzebuje**, albo gdy zależność zacznie iść w drugą
 stronę. Wtedy `frame.py`, `values.py`, `endpoints/` i `registry.py` przenoszą się do
-`lagunbus-core` — i dopiero wtedy rozdzielenie repozytoriów zaczyna mieć sens. Osobny
-symulator do uruchamiania z ręki, kiedy powstanie, będzie pierwszym, który to sprawdzi.
+`lagunbus-core` — i dopiero wtedy rozdzielenie repozytoriów zaczyna mieć sens.
+
+The simulator run by hand was expected to be the first test of this, and it did not need
+`lagunbus-core`: it does not take the hub's codec at all, but the node library's
+(`../lagunbus-node`, in C, the same as the boards — zadania/zrobione/FEAT-02.md N10). The only
+thing the two sides share is the UDP datagram format, written down once and pinned by
+the same byte vector on both sides. H5 stays open, for the same condition.
 
 Widać już jednego kandydata: hub **przepuszcza wszystko** i nie ma filtrów, a węzeł ma bardzo
 wąskie filtry sprzętowe ([`05`](../lagunbus-spec/05-mapowanie-can.md) §3). Atrapa ich nie

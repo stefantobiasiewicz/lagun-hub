@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import queue
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from lagunhub.core.bindings import BindingEngine
@@ -17,7 +18,7 @@ from lagunhub.core.hub import CoreThread
 from lagunhub.core.model import Installation, NodeModel, NodeState, Uid
 from lagunhub.core.rx import ColdItem, RxThread, Sent
 from lagunhub.core.transactions import Outcome
-from lagunhub.protocol.bus import VirtualBus, VirtualNetwork
+from lagunhub.protocol.bus import Bus, VirtualBus, VirtualNetwork
 from lagunhub.protocol.endpoints import output as out
 from lagunhub.protocol.frame import Frame, encode_id
 from lagunhub.protocol.registry import MessageKind
@@ -53,7 +54,10 @@ class Rig:
     rx: RxThread
     engine: BindingEngine
     core: CoreThread
-    preview: VirtualBus
+    preview: Bus
+    settle: float = 0.0
+    """Real time to wait after the nodes send — for a bus that goes through the kernel
+    (UDP), where a frame is not in the other socket the instant `send` returns."""
 
     @property
     def key(self) -> KeyInput:
@@ -72,6 +76,8 @@ class Rig:
             for node in (self.key_sim, self.relay):
                 node.poll()
                 node.tick(self.clock.now)
+            if self.settle:
+                time.sleep(self.settle)
             self.rx.pump()
             self.core.pump(self.clock.now)
             for node in (self.key_sim, self.relay):
@@ -84,19 +90,23 @@ class Rig:
         self.run(0.050)
 
 
-def build(tmp_path) -> Rig:  # type: ignore[no-untyped-def]
+def build(  # type: ignore[no-untyped-def]
+    tmp_path, attach: Callable[[str], Bus] | None = None, settle: float = 0.0
+) -> Rig:
+    """The rig on a virtual bus — or on any other, when `attach` makes the ports."""
     path = tmp_path / "poc.yaml"
     path.write_text(CONFIG, encoding="utf-8")
     config = load(path)
 
     clock = Clock()
     net = VirtualNetwork()
+    port = attach if attach is not None else net.attach
     key_sim = key1(uid=bytes(range(8)), address=0x02A, clock=clock, name="key")
     relay = relay1(uid=bytes(range(8, 16)), address=0x040, clock=clock, name="relay")
-    key_sim.start(net.attach("key"))
-    relay.start(net.attach("relay"))
+    key_sim.start(port("key"))
+    relay.start(port("relay"))
 
-    hub_port = net.attach("hub")
+    hub_port = port("hub")
     installation = Installation()
     apply(installation, config)
     for uid, address in ((bytes(range(8)), 0x02A), (bytes(range(8, 16)), 0x040)):
@@ -108,12 +118,14 @@ def build(tmp_path) -> Rig:  # type: ignore[no-untyped-def]
     core = CoreThread(
         installation, cold, lambda s: setattr(engine, "snapshot", s), buses=[hub_port], clock=clock
     )
-    preview = net.attach("preview_port")
+    preview = port("preview_port")
+    if settle:
+        time.sleep(settle)
     while preview.recv() is not None:
         pass
     rx.pump()
     core.pump(clock.now)
-    return Rig(clock, net, key_sim, relay, rx, engine, core, preview)
+    return Rig(clock, net, key_sim, relay, rx, engine, core, preview, settle)
 
 
 def test_a_key_toggles_a_relay(tmp_path) -> None:  # type: ignore[no-untyped-def]

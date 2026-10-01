@@ -113,7 +113,17 @@ class TestListening:
 class TestReport:
     def test_the_exit_code_says_whether_it_can_start(self, tmp_path: Path) -> None:
         """`doctor` makes sense in a script: zero means "start"."""
-        (tmp_path / "hub.yaml").write_text(_CONFIG, encoding="utf-8")
+        import socket
+
+        # A port nobody listens on — not the default 8080, which a hub running on this
+        # machine (PyCharm's "1 · Hub", say) holds, and which would fail this test for a
+        # reason that has nothing to do with the exit code.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            free = probe.getsockname()[1]
+        (tmp_path / "hub.yaml").write_text(
+            _CONFIG + f"api:\n  host: 127.0.0.1\n  port: {free}\n", encoding="utf-8"
+        )
         _, code = doctor.summary(doctor.check(tmp_path))
         assert code == 0
 

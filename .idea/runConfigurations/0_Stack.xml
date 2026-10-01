@@ -1,0 +1,8 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="0 · Stack: hub + simulators" type="CompoundRunConfigurationType">
+    <toRun name="1 · Hub (UDP, simulators)" type="PythonConfigurationType" />
+    <toRun name="3a · Sim: kitchen-relay (output)" type="PythonConfigurationType" />
+    <toRun name="3b · Sim: test key (bound to the relay)" type="PythonConfigurationType" />
+    <method v="2" />
+  </configuration>
+</component>
