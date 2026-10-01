@@ -143,7 +143,7 @@ class Reconciler:
         if outcome.result == ResultCode.UNSUPPORTED_ELEMENT and meta.optional:
             # Not a failure: the device sets this itself (types/0x0010-key-input.md
             # §2.4). Remembered, so that the API refuses it from now on without asking
-            # the node (zadania/CR-01.md, N10).
+            # the node (zadania/zrobione/CR-01.md, N10).
             task.pending.pop(0)
             task.node.endpoint(endpoint).absent.add(meta.id)
             self._issue(

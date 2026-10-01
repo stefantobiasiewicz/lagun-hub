@@ -146,7 +146,7 @@ class TestReconciling:
 
 class TestOnlyWhatTheEndpointDeclares:
     """Reconciling sends nothing an endpoint cannot have — the file is wrong, not the
-    node (01-model-danych.md §2.1, `LB-HUB-026`; zadania/CR-01.md, N10)."""
+    node (01-model-danych.md §2.1, `LB-HUB-026`; zadania/zrobione/CR-01.md, N10)."""
 
     def test_a_value_of_an_undeclared_feature_is_not_written(
         self, clock: Clock, tmp_path: Path

@@ -182,7 +182,7 @@ class EndpointModel:
     (types/0x0010-key-input.md §2.4). The hub learns it from the first refusal while
     reconciling rather than by probing every optional attribute at enumeration: that
     would cost up to a dozen transactions per key to answer a question nobody has asked
-    yet (zadania/CR-01.md, N10).
+    yet (zadania/zrobione/CR-01.md, N10).
 
     Not stored: after a restart the hub learns it again at the first reconciliation,
     and a new enumeration builds a new model, so a firmware that starts exposing the

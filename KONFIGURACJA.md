@@ -311,7 +311,7 @@ Atrybut opcjonalny, którego węzeł nie wystawia (klawisz z `HOLD` może ustala
 wychodzi przy pierwszym uzgodnieniu: węzeł odpowiada „nie mam", hub to zapamiętuje, zgłasza
 i od tej chwili API odmawia zapisu bez pytania węzła. Nie odpytujemy wszystkich atrybutów
 opcjonalnych przy rozpoznaniu — kosztowałoby to kilkanaście transakcji na panel dla pytania,
-którego nikt jeszcze nie zadał (`zadania/CR-01.md`, N10).
+którego nikt jeszcze nie zadał (`zadania/zrobione/CR-01.md`, N10).
 
 **Atrybut, którego w pliku nie ma, nie jest dotykany.** Nie ma czegoś takiego jak „przywróć
 domyślną" — od tego jest `FactoryReset`. Plik opisuje odstępstwa od tego, co węzeł ma

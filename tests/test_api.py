@@ -315,7 +315,7 @@ class TestOnlyWhatTheEndpointDeclares:
     `LB-HUB-026`) — and says so **before** the file or the bus, not after a refusal.
 
     `key1` has `HOLD` and `MULTICLICK`, no `RAW`, and exposes `HoldThreshold` but sets
-    its other timings itself (zadania/CR-01.md, N10).
+    its other timings itself (zadania/zrobione/CR-01.md, N10).
     """
 
     @pytest.fixture

@@ -9,7 +9,7 @@ features at all. Multi-click, hold and the RAW mode are features, and the timing
 optional even within their feature — a device that does not expose one uses its own,
 fixed and within the type's range (types/0x0010-key-input.md §1 and §2.4). Contact
 bounce and input polarity are not attributes at all: they belong to how the device is
-built, not to the hub (zadania/CR-01.md, N1a and N5).
+built, not to the hub (zadania/zrobione/CR-01.md, N1a and N5).
 """
 
 from __future__ import annotations
