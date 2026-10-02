@@ -48,6 +48,7 @@ from lagunhub.api.views import (
     ConfigView,
     DiffRow,
     EndpointView,
+    EnumerateView,
     EventView,
     HealthView,
     HubInfo,
@@ -56,6 +57,7 @@ from lagunhub.api.views import (
     NodeView,
     Plain,
     ReconcileView,
+    RemoveView,
     TargetView,
     TrafficView,
 )
@@ -282,6 +284,122 @@ class HubApi:
 
         self.core.submit(task)
         return _outcome(self._collect(future))
+
+    def remove(self, ref: str, *, force: bool = False) -> RemoveView:
+        """Forget a node — its model, its join record, its entry in the file and every
+        binding it takes part in (06-cykl-zycia-urzadzenia.md §6).
+
+        Ordinary removal sends `FactoryReset` and forgets **only once the node
+        acknowledged it**: silence or a refusal is an error, and nothing changes. Forced
+        removal sends the reset too but does not wait — for a module that is dead or
+        already off the wall, the case zigbee2mqtt calls "force remove". The hub then
+        keeps hearing the address until the node lets go of it, so nobody else gets it
+        (03-adresacja.md §6).
+        """
+        future: Future[RemoveView] = Future()
+
+        def task() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            inst = self.core.installation
+            try:
+                uid = self._find(inst, ref)
+                node = inst.nodes.get(uid)
+                if node is not None and self.core.enumeration.busy(node.short_id):
+                    # Enumeration would finish after us and put the model back.
+                    raise ApiError(
+                        Problem.CONFLICT, f"{ref}: it is being enumerated — try again after"
+                    )
+                if not force and (node is None or not node.address):
+                    raise ApiError(
+                        Problem.UNAVAILABLE,
+                        f"{ref}: the hub cannot reach it to reset it — remove it with force",
+                    )
+            except BaseException as exc:
+                future.set_exception(exc)
+                return
+
+            if force:
+                if node is not None and node.address:
+                    self._reset(node, self._late_acknowledgement(node.address))
+                future.set_result(self._forget(uid, acknowledged=None))
+                return
+
+            def done(outcome: Outcome) -> None:
+                try:
+                    try:
+                        _outcome(outcome)
+                    except ApiError as refused:
+                        raise ApiError(
+                            refused.problem,
+                            f"{ref}: {refused.message} — nothing was removed; if the "
+                            f"module is gone, remove it with force",
+                            result=refused.result,
+                        ) from None
+                    view = self._forget(uid, acknowledged=True)
+                except BaseException as exc:
+                    if not future.done():
+                        future.set_exception(exc)
+                    return
+                if not future.done():
+                    future.set_result(view)
+
+            assert node is not None
+            self._reset(node, done)
+
+        self.core.submit(task)
+        return self._collect(future)
+
+    def enumerate(self, ref: str) -> EnumerateView:
+        """Read the node again — identity and descriptor — without waiting for a firmware
+        change (06-cykl-zycia-urzadzenia.md §3.3: "the operator can force it").
+
+        The model the hub holds **stays until the new one replaces it**: a read that
+        fails half way leaves the node working as it was, and the failure is reported.
+        """
+
+        def order(inst: Installation) -> EnumerateView:
+            node = self._present(inst, ref)
+            if self.core.enumeration.busy(node.short_id):
+                raise ApiError(Problem.CONFLICT, f"{ref}: enumeration is already running")
+            record = inst.records.get(node.short_id)
+            if record is None:
+                record = inst.record(node.short_id)
+                record.address, record.bus, record.uid = node.address, node.bus, node.uid
+            started = self.core.enumeration.start(record)
+            return EnumerateView(started=started, running=len(self.core.enumeration))
+
+        return self._ask(order)
+
+    def block(self, ref: str) -> ConfigView:
+        """Tell the hub not to serve this node (06-cykl-zycia-urzadzenia.md §8).
+
+        It goes **to the file**, like every decision about the installation, and from
+        there into the model when the file is applied. A node the file does not know yet —
+        one waiting as `PENDING`, say — gets an entry holding nothing but the block.
+        """
+        uid = self._ask(lambda inst: self._known(inst, ref))
+        path = ("nodes", bytes(uid).hex(), "blocked")
+        # The current digest, not one the caller saw: the change is computed from the
+        # file as it is now, so there is no stale view of it to protect.
+        return self._write(lambda store: store.set(path, True, etag=store.digest()))
+
+    def unblock(self, ref: str) -> ConfigView:
+        """Undo `block`. An entry `block` created with nothing else in it goes with it —
+        otherwise unblocking a stranger would leave an empty entry behind."""
+        uid = self._ask(lambda inst: self._known(inst, ref))
+        key = bytes(uid).hex()
+
+        def change(store: ConfigStore) -> Config:
+            nodes = store.document().get("nodes") or {}
+            entry = next((v for k, v in nodes.items() if str(k).lower() == key), None)
+            if not isinstance(entry, Mapping) or entry.get("blocked") is not True:
+                raise ApiError(Problem.INVALID, f"{ref} is not blocked")
+            alone = set(entry) == {"blocked"}
+            path = ("nodes", key) if alone else ("nodes", key, "blocked")
+            return store.delete(path, etag=store.digest())
+
+        return self._write(change)
 
     def command(
         self, ref: str, endpoint: int, name: str, args: Mapping[str, Any] | None = None
@@ -535,6 +653,12 @@ class HubApi:
         silence = None
         if node is not None and node.last_heard and node.silence_threshold:
             silence = max(0.0, self.core.clock() - node.last_heard)
+        state = node.state.name if node else "UNKNOWN"
+        if node is None:
+            # A node the hub knows only from a join record — blocked before it was ever
+            # read, say — has a state worth showing all the same.
+            record = next((r for r in inst.records.values() if r.uid == uid), None)
+            state = record.state.name if record else state
         return NodeSummary(
             uid=bytes(uid).hex(),
             alias=wanted.alias if wanted else "",
@@ -542,10 +666,11 @@ class HubApi:
             room=wanted.room if wanted else "",
             address=node.address if node else 0,
             bus=self._bus_name(node.bus) if node else "",
-            state=node.state.name if node else "UNKNOWN",
+            state=state,
             endpoints=len(node.endpoints) if node else 0,
             silent_for=silence,
             configured=wanted is not None,
+            blocked=inst.is_blocked(uid),
         )
 
     def _node(self, inst: Installation, uid: Uid) -> NodeView:
@@ -864,14 +989,79 @@ class HubApi:
         return record
 
     def _present(self, inst: Installation, ref: str) -> NodeModel:
-        """A node one can talk to. Configured but absent — one cannot."""
+        """A node one can talk to. Configured but absent — one cannot; blocked — one
+        does not (06-cykl-zycia-urzadzenia.md §8)."""
         uid = self._find(inst, ref)
         node = inst.nodes.get(uid)
         if node is None:
             raise ApiError(Problem.UNAVAILABLE, f"{ref}: the hub has not seen it yet")
+        if inst.is_blocked(uid):
+            raise ApiError(Problem.UNAVAILABLE, f"{ref}: is blocked — unblock it first")
         if not node.address:
             raise ApiError(Problem.UNAVAILABLE, f"{ref}: has no address")
         return node
+
+    def _known(self, inst: Installation, ref: str) -> Uid:
+        """`_find`, plus the nodes only a join record knows by `Uid` — a stranger waiting
+        as `PENDING`, which the operator may want to block rather than admit."""
+        try:
+            return self._find(inst, ref)
+        except ApiError:
+            sought = ref.strip().lower()
+            for record in inst.records.values():
+                if record.uid is not None and bytes(record.uid).hex() == sought:
+                    return record.uid
+            raise
+
+    def _reset(self, node: NodeModel, done: Callable[[Outcome], None]) -> None:
+        self.core.transact(
+            node.bus,
+            node.address,
+            0,
+            dev.FACTORY_RESET,
+            MessageKind.COMMAND,
+            encode("u32", dev.FACTORY_RESET_MAGIC),
+            done,
+        )
+
+    def _late_acknowledgement(self, address: int) -> Callable[[Outcome], None]:
+        """A forced removal did not wait — but if the node acknowledges after all, its
+        address is free on the bus too, exactly as after an ordinary removal."""
+
+        def done(outcome: Outcome) -> None:
+            if outcome.ok and self.core.installation.holder(address) is None:
+                self.core.strangers.forget(address)
+
+        return done
+
+    def _forget(self, uid: Uid, *, acknowledged: bool | None) -> RemoveView:
+        """From the CORE thread: the model, then the file.
+
+        A file that cannot be changed does not undo the removal — the node has already
+        been reset, or (forced) let go of. It is reported, and the entry is left for a
+        person to delete.
+        """
+        node = self.core.forget(uid, acknowledged=acknowledged is True)
+        unconfigured, bindings = False, 0
+        store = self.core.config_store
+        if store is not None and uid in self.core.installation.wanted:
+            try:
+                config, bindings = store.forget_node(uid, etag=store.digest())
+            except (ConfigError, OSError) as exc:
+                self.core.installation.issues.append(
+                    f"{bytes(uid).hex()} was removed, but its entry could not leave the "
+                    f"configuration file: {exc} — delete it by hand"
+                )
+            else:
+                unconfigured = True
+                self.core.apply_config(config)
+        return RemoveView(
+            uid=bytes(uid).hex(),
+            acknowledged=acknowledged,
+            address=node.address if node is not None else 0,
+            unconfigured=unconfigured,
+            bindings=bindings,
+        )
 
     def _functional(
         self, inst: Installation, ref: str, endpoint: int

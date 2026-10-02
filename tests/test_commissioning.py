@@ -11,7 +11,7 @@ import queue
 
 from lagunhub.core.commissioning import ACCEPT_WINDOW, Commissioning
 from lagunhub.core.hub import CoreThread
-from lagunhub.core.model import AddressPool, Installation, NodeState, Snapshot
+from lagunhub.core.model import AddressPool, Installation, NodeState, Snapshot, Uid
 from lagunhub.core.rx import ColdItem, Received
 from lagunhub.core.schedule import Schedule
 from lagunhub.protocol.bus import VirtualNetwork
@@ -140,15 +140,37 @@ class TestJoiningMode:
         assert comm.readmitted == 1
         assert inst.records[0xAABBCCDD].address == 0x001
 
-    def test_a_retired_one_needs_the_mode_like_an_unknown_one(self, clock: Clock) -> None:
-        """A retired one may still speak up — the state stays in the database
-        (06-cykl-zycia-urzadzenia.md §6)."""
+    def test_a_removed_one_needs_the_mode_like_an_unknown_one(self, clock: Clock) -> None:
+        """Removing forgets the record, so a removed node is as unknown as one never
+        seen (06-cykl-zycia-urzadzenia.md §6) — and gets in once the mode is open. The
+        former `RETIRED` state kept it out even then."""
         comm, inst, sender, _ = joining(clock)
-        inst.record(0xAABBCCDD).state = NodeState.RETIRED
+        comm.accept_new()
+        comm.on_join(0, announcement(0xAABBCCDD))
+        inst.record(0xAABBCCDD).uid = Uid(b"\x01" * 8)
+        inst.forget(Uid(b"\x01" * 8))
+        comm._close()
 
         comm.on_join(0, announcement(0xAABBCCDD))
-        assert sender.assignments() == []
-        assert inst.records[0xAABBCCDD].state == NodeState.RETIRED
+        assert inst.records[0xAABBCCDD].state == NodeState.PENDING
+
+        comm.accept_new()
+        comm.on_join(0, announcement(0xAABBCCDD))
+        assert sender.assignments()[-1] == (0xAABBCCDD, 0x001)
+
+    def test_a_blocked_one_gets_nothing_even_with_the_mode_open(self, clock: Clock) -> None:
+        """The one exception to "a known one always gets its address"
+        (06-cykl-zycia-urzadzenia.md §8)."""
+        comm, inst, sender, _ = joining(clock)
+        comm.accept_new()
+        comm.on_join(0, announcement(0xAABBCCDD))
+        inst.record(0xAABBCCDD).uid = Uid(b"\x01" * 8)
+        inst.blocked = frozenset({Uid(b"\x01" * 8)})
+
+        comm.on_join(0, announcement(0xAABBCCDD))
+
+        assert sender.assignments() == [(0xAABBCCDD, 0x001)]
+        assert inst.records[0xAABBCCDD].state == NodeState.BLOCKED
 
 
 class TestAnnouncement:

@@ -95,6 +95,15 @@ class Commissioning:
         record.bus = bus
         record.last_seen = self._clock()
 
+        if self.installation.is_blocked(record.uid):
+            # The one exception to "a known one always gets its address", and it holds
+            # with the mode open too (06-cykl-zycia-urzadzenia.md §8). Recognised by the
+            # `Uid` the record remembers — a blocked node the hub has never read only
+            # announces a `ShortId`, and goes the ordinary way until it is read.
+            record.state = NodeState.BLOCKED
+            self.deferred += 1
+            return
+
         known = record.state in (NodeState.JOINED, NodeState.READY, NodeState.ABSENT)
         if known and record.address:
             # A known device gets its address ALWAYS and without asking about the mode.
@@ -104,11 +113,10 @@ class Commissioning:
             self._assign(bus, record, record.address)
             return
 
-        if record.state == NodeState.RETIRED or not self.accepting:
-            # A retired one is treated like an unknown one: it may still speak up, so
-            # it needs joining mode (06-cykl-zycia-urzadzenia.md §6).
-            if record.state != NodeState.RETIRED:
-                record.state = NodeState.PENDING
+        if not self.accepting:
+            # A removed node lands here too: removing forgets its record, so it is as
+            # unknown as one never seen (06-cykl-zycia-urzadzenia.md §6).
+            record.state = NodeState.PENDING
             self.deferred += 1
             return
 

@@ -198,6 +198,26 @@ def routes(api: HubApi) -> list[Route]:
             re.compile(r"^/nodes/([^/]+)/identify$"),
             lambda r: Response(body=api.identify(r.args[0], int(r.field("seconds", 5)))),
         ),
+        (
+            "POST",
+            re.compile(r"^/nodes/([^/]+)/remove$"),
+            lambda r: Response(body=api.remove(r.args[0], force=bool(r.field("force", False)))),
+        ),
+        (
+            "POST",
+            re.compile(r"^/nodes/([^/]+)/enumerate$"),
+            lambda r: Response(body=api.enumerate(r.args[0])),
+        ),
+        (
+            "POST",
+            re.compile(r"^/nodes/([^/]+)/block$"),
+            lambda r: Response(body=api.block(r.args[0])),
+        ),
+        (
+            "POST",
+            re.compile(r"^/nodes/([^/]+)/unblock$"),
+            lambda r: Response(body=api.unblock(r.args[0])),
+        ),
         ("GET", re.compile(r"^/config$"), _config),
         ("PUT", re.compile(r"^/config/(.+)$"), _set),
         ("DELETE", re.compile(r"^/config/(.+)$"), _delete),

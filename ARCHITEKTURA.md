@@ -475,6 +475,7 @@ ZGŁOSZENIE (K=1, ShortId w ID)
         │
         ▼  CORE porównuje PEŁNE 32 bity ShortId, nie tylko te z identyfikatora
    ┌────────────────────────────────────────────┐
+   │ Uid zablokowany w pliku?  → nic, BLOCKED   │  także przy włączonym trybie (§8.4)
    │ ShortId znany?                             │
    │   TAK  → adres, który ten węzeł miał       │  zawsze, bez pytania o tryb
    │   NIE  → tryb przyjmowania włączony?       │
@@ -492,15 +493,15 @@ Asymetria z [`06`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md) §2.1 jest tuta
 ceremonii. Tryb chroni wyłącznie przed wejściem urządzenia nieznanego i wygasa sam po
 piętnastu minutach.
 
-Pula adresów trzyma trzy bloki (`CONTROL` `0x001`–`0x0FF`, `SENSOR` `0x100`–`0x3FF`,
-rezerwa `0x400`–`0x7FD`) i zna stan `RETIRED`, żeby nie przydzielić adresu, spod którego
-może się jeszcze odezwać usunięty węzeł.
+The address pool keeps three blocks (`CONTROL` `0x001`–`0x0FF`, `SENSOR` `0x100`–`0x3FF`,
+reserve `0x400`–`0x7FD`). An address a removed node may still speak from is protected by
+the pool's *heard* set, not by a state of its own (§8.4).
 
 ### 8.3 A node at an address the hub does not know
 
 A node with an address never announces itself, so joining will not bring it in when the
-hub's database lacks it — a lost or old database, a retired node the `FactoryReset` did
-not reach, a module used elsewhere ([`06`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md)
+hub's database lacks it — a lost or old database, a node removed by force whose
+`FactoryReset` did not reach it, a module used elsewhere ([`06`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md)
 §2.3). `core/strangers.py` handles it:
 
 ```
@@ -512,6 +513,7 @@ any frame FROM a node (report, event, alarm, reply, query)
          read Device.Uid, then Device.ShortId      once per address, 60 s pause on silence
             Uid known       → issue: database and bus disagree
             ShortId known   → issue: the same, seen from the other key
+            Uid blocked     → JoinRecord BLOCKED with that address (§8.4)
             otherwise       → JoinRecord PENDING with that address
                                  admit          → JOINED, enumeration, READY
                                  factory_reset  → the node forgets the address and joins anew
@@ -531,6 +533,51 @@ next restart, which out of two thousand costs nothing.
 Two nodes under one address on **one** cable stay invisible — an accepted risk, prevented
 by the rule that a used module is reset to factory settings before it is plugged in
 (`lagunbus-spec/DECYZJE.md`, "Konflikt adresów: zapobieganie zamiast wykrywania").
+
+### 8.4 Removing, blocking, reading again
+
+Three operator operations from [`06`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md) §6,
+§8 and §3.3, worked out in `zadania/zrobione/FEAT-04.md`.
+
+```
+remove(node)          FactoryReset, wait ── acknowledged ─→ forget: model, join record,
+                                         └─ silent/refused → error, nothing changes
+remove(node, force)   FactoryReset, do not wait ──────────→ forget
+block(node)           nodes.yaml: blocked: true ──────────→ BLOCKED on reload
+unblock(node)         the field goes ─────────────────────→ enumeration → READY
+enumerate(node)       read identity and descriptor again; the old model stays until then
+```
+
+**Removing forgets everything**: the model, every join record naming the node, its entry
+in `nodes.yaml` and every binding it takes part in — a binding naming an alias nobody
+holds would make the whole file fail to load. The file is changed by
+`ConfigStore.forget_node`, the one write that touches two files; bindings are written
+first, so a crash in between leaves a node without bindings (loads), never bindings
+without their node (does not). There used to be a `RETIRED` state for this; it kept a
+note nothing acted on, and a forgotten record behaves the same, including for a node the
+reset never reached (`lagunbus-spec/DECYZJE.md`, "Usunięcie: zapomnienie w dwóch trybach;
+zablokowanie osobno").
+
+**The address after removal.** It goes back to the pool at once, but stays *heard* until
+the node acknowledges its reset — then `Strangers.forget` lets go of it, and the same node
+admitted again usually gets the same address. A forced removal that is acknowledged late
+frees it the same way; one never acknowledged keeps it blocked until the hub restarts, and
+the module, if it still works, comes back as `PENDING` (§8.3).
+
+**Blocking lives in the file**, keyed by `Uid`: it has to survive a restart, the hub does
+not keep its database yet, and an address changes when a node is admitted again. A
+blocked node is recognised wherever its `Uid` is known — in a join record, after
+enumeration, or by `Strangers` after a restart — and then gets no address (accepting
+mode or not), is not enumerated, reconciled or controlled through the API, and keeps its
+address. Bindings are not checked on the fast path: `Installation.snapshot()` leaves out
+every binding whose source or target is blocked, so RX never sees them. One thing
+blocking cannot take back: **group membership already written to the node** stays in
+it, so a group command still reaches it. Undoing that means talking to the node, which a
+block exists not to do.
+
+**Enumerating again** replaces the model only when the new one is complete; a failure
+leaves the node working as it was and is reported as an issue and a `NODE` event — before
+this, a failed enumeration dropped its reason.
 
 ### 8.2 Dlaczego model ma dwie tablice
 
@@ -821,6 +868,10 @@ GET  /health                                 histogram opóźnień, liczniki, st
 POST /commissioning/accept                   tryb przyjmowania, wygasa po 15 min
 POST /commissioning/{ShortId}/admit         przyjmij węzeł PENDING spod jego adresu (§8.3)
 POST /commissioning/{ShortId}/factory-reset reset fabryczny węzła PENDING (§8.3)
+POST /nodes/{uid}/remove                     forget the node; {"force": true} does not wait (§8.4)
+POST /nodes/{uid}/enumerate                  read the node again (§8.4)
+POST /nodes/{uid}/block                      blocked: true in the file (§8.4)
+POST /nodes/{uid}/unblock                    the field goes; the node is read again (§8.4)
 GET  /events                                 SSE — zdarzenia i zmiany stanu na żywo
 ```
 
@@ -1153,7 +1204,9 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
   `Uptime` niższy niż poprzednio to restart, którego hub nie zauważył,
 - dziennik zdarzeń i rozjazdów — **do decyzji operatora, nie do zgadywania**
   ([`07-hub.md`](../lagunbus-spec/07-hub.md) §5.3),
-- usunięcie węzła, `FactoryReset`, stan `RETIRED`; kopia katalogu konfiguracji.
+- kopia katalogu konfiguracji,
+- zablokowanie nie cofa członkostwa w grupach zapisanego wcześniej w węźle (§8.4) — komenda
+  grupowa wciąż do niego dociera.
 
 ### 14.5 Widok
 

@@ -178,6 +178,74 @@ class ConfigStore:
         self._etag = self.digest()
         return config
 
+    def forget_node(self, uid: bytes, *, etag: str) -> tuple[Config, int]:
+        """Remove a node's entry **and every binding it takes part in** — the file half
+        of removing a node (06-cykl-zycia-urzadzenia.md §6). Returns the new
+        configuration and how many bindings went.
+
+        Bindings go with it because they name the node by alias, and a binding naming an
+        alias nobody holds fails the whole file. A binding with several targets loses
+        only this node's; one left with none goes entirely.
+
+        **Two files in one operation** — the one place `_edit`'s "one write, one file"
+        does not hold. The order makes up for it: bindings are written first, so a crash
+        between the two writes leaves a node without bindings, which loads, rather than
+        bindings without their node, which does not.
+        """
+        latest = self.digest()
+        if etag != latest:
+            raise ConflictError(
+                f"the file changed since {etag}; it is now {latest} — refresh and try again"
+            )
+        nodes_file = self._home("nodes")
+        bindings_file = self._home("bindings")
+        nodes_doc: Any = self._yaml.load(nodes_file) if nodes_file.exists() else {}
+        bindings_doc: Any = (
+            nodes_doc
+            if bindings_file == nodes_file
+            else (self._yaml.load(bindings_file) if bindings_file.exists() else {})
+        )
+        for file_, doc in ((nodes_file, nodes_doc), (bindings_file, bindings_doc)):
+            if not isinstance(doc, dict):
+                raise ConfigError(f"{file_.name}: expected a mapping at the top level")
+
+        wanted = bytes(uid).hex()
+        nodes = nodes_doc.get("nodes") or {}
+        key = next((k for k in nodes if str(k).lower() == wanted), None)
+        names = {wanted}
+        if key is not None:
+            entry = nodes[key] or {}
+            names.add(str(entry.get("alias", "")) or str(key))
+            del nodes[key]
+
+        removed = 0
+        bindings = bindings_doc.get("bindings") or []
+        for index in reversed(range(len(bindings))):
+            binding = bindings[index]
+            if _names(binding.get("from"), names):
+                del bindings[index]
+                removed += 1
+                continue
+            targets = binding.get("to")
+            if isinstance(targets, list):
+                for t in reversed(range(len(targets))):
+                    if _names(targets[t], names):
+                        del targets[t]
+                if targets:
+                    continue
+            elif not _names(targets, names):
+                continue
+            del bindings[index]
+            removed += 1
+
+        merged = {**self.document(), **bindings_doc, **nodes_doc}
+        config = from_document(merged)
+        if bindings_file != nodes_file:
+            _atomic_write(bindings_file, self._dump(bindings_doc))
+        _atomic_write(nodes_file, self._dump(nodes_doc))
+        self._etag = self.digest()
+        return config, removed
+
     def _home(self, top: str) -> Path:
         """Which file this key belongs to. For a single file — to that one."""
         if not self.where.is_dir():
@@ -220,6 +288,14 @@ def _poke(document: dict[Any, Any], path: tuple[str, ...], value: Any, *, remove
         del place[last]
     else:
         place[last] = value
+
+
+def _names(end: Any, names: set[str]) -> bool:
+    """Whether one end of a binding is this node — by alias or by `Uid`, the two ways the
+    loader accepts."""
+    if not isinstance(end, dict) or "node" not in end:
+        return False  # a group target names no node
+    return str(end["node"]) in names or str(end["node"]).lower() in names
 
 
 NUMERIC: Final = ("endpoints", "groups")

@@ -23,6 +23,7 @@ from lagunhub.api import (
     ConfigView,
     DiffRow,
     EndpointView,
+    EnumerateView,
     EventView,
     HealthView,
     HubInfo,
@@ -30,6 +31,7 @@ from lagunhub.api import (
     NodeView,
     Problem,
     ReconcileView,
+    RemoveView,
     TrafficView,
 )
 
@@ -148,6 +150,8 @@ class FakeHub:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
+        self.removed: set[str] = set()
+        """Nodes `remove` made the hub forget — gone from the list, `NOT_FOUND` by name."""
         self.etag = "sha256:aaa"
         self.binding_rows: tuple[BindingView, ...] = ()
         self.drift: tuple[DiffRow, ...] = (
@@ -171,6 +175,9 @@ class FakeHub:
         return HubInfo(name="lagun-hub", version="0.1.0", nodes=1, ready=1, buses=("ground-floor",))
 
     def nodes(self) -> tuple[NodeSummary, ...]:
+        return tuple(n for n in self._nodes() if n.alias not in self.removed)
+
+    def _nodes(self) -> tuple[NodeSummary, ...]:
         return (
             NodeSummary(
                 uid=RELAY,
@@ -187,6 +194,8 @@ class FakeHub:
 
     def node(self, ref: str) -> NodeView:
         self._record("node", ref)
+        if ref in self.removed:
+            raise ApiError(Problem.NOT_FOUND, f"there is no node {ref!r}")
         if ref in ("hall-switch", SWITCH):
             return NodeView(
                 uid=SWITCH,
@@ -241,6 +250,23 @@ class FakeHub:
     def identify(self, ref: str, seconds: int = 5) -> ActionView:
         self._record("identify", ref, seconds)
         return ActionView(ok=True, result="OK", attempts=1, elapsed=0.003)
+
+    def remove(self, ref: str, *, force: bool = False) -> RemoveView:
+        self._record("remove", ref, force)
+        self.removed.add(ref)
+        return RemoveView(uid=RELAY, acknowledged=None if force else True, address=0x040)
+
+    def enumerate(self, ref: str) -> EnumerateView:
+        self._record("enumerate", ref)
+        return EnumerateView(started=True, running=1)
+
+    def block(self, ref: str) -> ConfigView:
+        self._record("block", ref)
+        return ConfigView(etag="sha256:bbb")
+
+    def unblock(self, ref: str) -> ConfigView:
+        self._record("unblock", ref)
+        return ConfigView(etag="sha256:bbb")
 
     def accept_new(self, seconds: float = 900.0) -> CommissioningView:
         self._record("accept_new", seconds)

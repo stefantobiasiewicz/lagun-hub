@@ -100,6 +100,10 @@ class NodeSummary:
     """Whether this node is in the configuration file. A node that joined and is not
     configured is a normal thing — a freshly admitted one."""
 
+    blocked: bool = False
+    """The file says not to serve it (06-cykl-zycia-urzadzenia.md §8). Separate from
+    `state`, because the file may say so about a node the hub has not seen yet."""
+
 
 @dataclass(frozen=True, slots=True)
 class NodeView(NodeSummary):
@@ -234,6 +238,36 @@ class EventView:
 
 
 @dataclass(frozen=True, slots=True)
+class RemoveView:
+    """How removing a node ended (06-cykl-zycia-urzadzenia.md §6). A failed ordinary
+    removal is an error, not this view — nothing was removed then."""
+
+    uid: str
+    acknowledged: bool | None
+    """`True` — the node confirmed its reset and let go of its address. `None` — forced,
+    the hub did not wait: the node may still be working under its old address and come
+    back as `PENDING`."""
+
+    address: int = 0
+    """The address it had; `0` for a node the hub never saw."""
+
+    unconfigured: bool = False
+    """Its entry left the configuration file."""
+
+    bindings: int = 0
+    """How many bindings left the file with it."""
+
+
+@dataclass(frozen=True, slots=True)
+class EnumerateView:
+    """A re-enumeration was started. How it ends arrives as an event — reading a node is
+    a few dozen transactions, longer than a request should wait."""
+
+    started: bool
+    running: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ReconcileView:
     """How a reconcile request ended."""
 
@@ -290,6 +324,7 @@ __all__ = [
     "ConfigView",
     "DiffRow",
     "EndpointView",
+    "EnumerateView",
     "EventView",
     "HealthView",
     "HubInfo",
@@ -298,6 +333,7 @@ __all__ = [
     "NodeView",
     "Plain",
     "ReconcileView",
+    "RemoveView",
     "TargetView",
     "TrafficView",
 ]

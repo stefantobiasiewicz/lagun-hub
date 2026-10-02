@@ -222,12 +222,16 @@ def _node(key: str, raw: dict[str, Any], groups: dict[int, GroupConfig]) -> Node
     endpoints: dict[int, EndpointConfig] = {}
     for number, description in (raw.get("endpoints") or {}).items():
         endpoints[int(number)] = _endpoint(alias, int(number), description or {}, groups)
+    blocked = raw.get("blocked", False)
+    if not isinstance(blocked, bool):
+        raise ConfigError(f"{alias}: `blocked` is true or false, got {blocked!r}")
     return NodeConfig(
         alias=alias,
         uid=uid,
         name=str(raw.get("name", "")),
         room=str(raw.get("room", "")),
         endpoints=endpoints,
+        blocked=blocked,
     )
 
 

@@ -49,7 +49,7 @@ def setup() -> Installation:
     record.address = 0x012
     record.node_class = NodeClass.CONTROL
     record.state = NodeState.READY
-    inst.record(0x11112222).state = NodeState.RETIRED
+    inst.record(0x11112222).state = NodeState.BLOCKED
     return inst
 
 
@@ -93,15 +93,15 @@ class TestSaveAndLoad:
         assert endpoints[9].type_id is None, "an unknown type stays unknown"
 
     def test_join_records_survive(self, tmp_path: Path) -> None:
-        """The RETIRED state has to survive, because a retired ShortId may still speak
-        up."""
+        """A state other than READY has to survive too — `BLOCKED` is the one that
+        matters, since a blocked node keeps its address."""
         store = SqliteStore(tmp_path / "hub.db")
         store.save(setup())
         restored = store.load()
 
         assert restored.records[0xAABBCCDD].uid == PANEL
         assert restored.records[0xAABBCCDD].node_class == NodeClass.CONTROL
-        assert restored.records[0x11112222].state == NodeState.RETIRED
+        assert restored.records[0x11112222].state == NodeState.BLOCKED
 
     def test_addresses_return_to_the_pool_as_taken(self, tmp_path: Path) -> None:
         store = SqliteStore(tmp_path / "hub.db")

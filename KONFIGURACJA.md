@@ -160,6 +160,30 @@ Wyjście i jego pomiar prądu nazywają się raz, nie dwa razy.
 
 ---
 
+
+### 4.2 A blocked node
+
+`blocked: true` tells the hub to know a node and not serve it
+([`06-cykl-zycia-urzadzenia.md`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md) §8): no
+address at joining, no enumeration, no reconciling, no bindings from it or to it.
+
+```yaml
+nodes:
+  "0102030405060708":
+    alias: kitchen-switch
+    blocked: true
+```
+
+It is a field of the node entry, keyed by `Uid` like everything here, and not a record in
+the hub's database: it has to survive a restart, and an address — the only thing a
+database would add — changes when the node is admitted again. `B` in the view and
+`POST /nodes/{uid}/block` write it; a node the file does not know yet gets an entry
+holding nothing but the block, and unblocking such an entry removes it whole.
+
+Removing a node (`X` in the view, `POST /nodes/{uid}/remove`) is the opposite: its entry
+**and every binding naming it** leave the file
+([`ARCHITEKTURA.md`](ARCHITEKTURA.md) §8.4).
+
 ## 5. Powiązania
 
 ```yaml

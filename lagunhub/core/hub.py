@@ -106,6 +106,7 @@ class CoreThread(threading.Thread):
             self._read,
             on_ready=self._on_enumerated,
             on_conflict=self._on_uid_conflict,
+            on_failed=self._on_enumeration_failed,
         )
         self.commissioning = Commissioning(
             installation, self._send, self.schedule, clock, on_assigned=self._on_assigned
@@ -586,8 +587,26 @@ class CoreThread(threading.Thread):
         self._announce_node(node.uid, node.state.name)
         self.touch()  # a node arrived, so bindings may have a new target
         # The hub writes to the node what it holds itself — that way round, never the
-        # other.
+        # other. A blocked one is skipped by the reconciler itself.
         self.reconcile.start(node)
+
+    def _on_enumeration_failed(self, record: JoinRecord, reason: str) -> None:
+        """Said out loud, because one case of it is a person waiting: an enumeration they
+        asked for (06-cykl-zycia-urzadzenia.md §3.3). Before that it went nowhere — the
+        reason was dropped and the record quietly became `ABSENT`."""
+        who = record.uid.hex() if record.uid else f"ShortId 0x{record.short_id:08X}"
+        self.installation.issues.append(
+            f"{who} (0x{record.address:03X}): enumeration failed — {reason}"
+        )
+        self.events.publish(
+            Event(
+                kind=EventKind.NODE,
+                at=self.clock(),
+                uid=record.uid,
+                name="ENUMERATION_FAILED",
+                text=reason,
+            )
+        )
 
     def _on_booted(self, bus: int, address: int, data: bytes) -> None:
         """`Booted` carries the firmware version, so the hub decides **without polling**.
@@ -601,11 +620,11 @@ class CoreThread(threading.Thread):
         firmware = int.from_bytes(data[2:6], "little")
         self.commissioning.on_booted(bus, address)
         record = self.installation.record_at(bus, address)
-        if record is None or record.state == NodeState.PENDING:
+        if record is None or record.state in (NodeState.PENDING, NodeState.BLOCKED):
             # An address the hub does not know is `Strangers`' business, and it has
             # already seen this frame (06-cykl-zycia-urzadzenia.md §2.3). A pending node
             # waits for the operator — enumerating it here would let it in by the back
-            # door.
+            # door. A blocked one is not read at all (06-cykl-zycia-urzadzenia.md §8).
             return
         if record.uid is None:
             self.enumeration.start(record)
@@ -678,11 +697,56 @@ class CoreThread(threading.Thread):
         from lagunhub.core.config.apply import apply
 
         self.config = config
+        before = self.installation.blocked
         apply(self.installation, config)
+        self._apply_blocks(before, self.installation.blocked)
         self.touch()
         self.flush()
         for node in list(self.installation.nodes.values()):
             self.reconcile.start(node)
+
+    def _apply_blocks(self, before: frozenset[Uid], now: frozenset[Uid]) -> None:
+        """Carry a change of `blocked` in the file over to nodes the hub already knows
+        (06-cykl-zycia-urzadzenia.md §8).
+
+        Blocking only changes states and stops reconciling — the bindings follow from the
+        snapshot, which leaves out every binding touching a blocked node. Unblocking reads
+        the node again rather than trusting the model it had: the node was not served for
+        a while, and enumeration is what turns a known address into `READY`. A node with
+        no address has nothing to read — it goes the ordinary way when it announces.
+        """
+        inst = self.installation
+        for record in inst.records.values():
+            if record.uid in now - before:
+                record.state = NodeState.BLOCKED
+            elif record.uid in before - now:
+                if record.address:
+                    record.state = NodeState.JOINED
+                    self.enumeration.start(record)
+                else:
+                    record.state = NodeState.UNKNOWN
+        for uid in now - before:
+            self.reconcile.cancel(uid)
+            node = inst.nodes.get(uid)
+            if node is not None:
+                node.state = NodeState.BLOCKED
+                self._announce_node(uid, node.state.name)
+        for uid in before - now:
+            node = inst.nodes.get(uid)
+            if node is not None:
+                node.state = NodeState.JOINED
+
+    def forget(self, uid: Uid, *, acknowledged: bool) -> NodeModel | None:
+        """The model half of removing a node (06-cykl-zycia-urzadzenia.md §6): forget it,
+        and — once it acknowledged its reset — forget having heard its address too, so
+        the address can go to the next node, the same one admitted again included."""
+        self.reconcile.cancel(uid)
+        node = self.installation.forget(uid)
+        if node is not None and node.address and acknowledged:
+            self.strangers.forget(node.address)
+        self._announce_node(uid, "REMOVED")
+        self.touch()
+        return node
 
     def call(self, action: Callable[[Installation], None]) -> None:
         """A model change **from the CORE thread**. Outside it, `submit` does this."""

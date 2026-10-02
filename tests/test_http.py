@@ -377,6 +377,31 @@ class TestControl:
         assert error["result"] == "BUSY"
 
 
+class TestLifecycle:
+    """Removing, blocking and enumerating again are routed — the logic is
+    `test_removal.py`'s."""
+
+    def test_enumerate_is_started(self, hub: Hub) -> None:
+        status, view = hub.call("POST", "/nodes/kitchen-relay/enumerate")
+        assert status == 200 and view["started"] is True
+
+    def test_a_blocked_node_shows_it_and_refuses_commands(self, hub: Hub) -> None:
+        assert hub.call("POST", "/nodes/kitchen-relay/block")[0] == 200
+        assert hub.get("/nodes/kitchen-relay")[1]["state"] == "BLOCKED"
+        assert hub.get("/nodes/kitchen-relay")[1]["blocked"] is True
+        status, error = hub.call("POST", "/nodes/kitchen-relay/ep/4/commands/Toggle")
+        assert error["problem"] == "unavailable", status
+
+        assert hub.call("POST", "/nodes/kitchen-relay/unblock")[0] == 200
+        assert hub.get("/nodes/kitchen-relay")[1]["blocked"] is False
+
+    def test_remove_forgets_the_node(self, hub: Hub) -> None:
+        status, view = hub.call("POST", "/nodes/kitchen-relay/remove", {"force": False})
+        assert status == 200, view
+        assert view["acknowledged"] is True and view["unconfigured"] is True
+        assert hub.get("/nodes/kitchen-relay")[0] == 404
+
+
 class TestStream:
     def test_a_state_change_arrives_as_an_event(self, hub: Hub) -> None:
         with _sse(hub) as stream:

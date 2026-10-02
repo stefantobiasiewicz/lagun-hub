@@ -739,3 +739,99 @@ class TestStrangers:
         app.key(state, ord("y"))
         _run(state)
         assert not any(call[0] == "admit" for call in _fake(state).calls)
+
+
+class TestNodeLifecycle:
+    """Removing, blocking, enumerating again — 06-cykl-zycia-urzadzenia.md §6, §8, §3.3."""
+
+    def nodes(self, state: State) -> State:
+        state.worker._on_done = lambda _: None
+        state.section = Section.NODES
+        return state
+
+    def test_x_asks_once_and_enter_removes(self, state: State) -> None:
+        self.nodes(state)
+        app.key(state, ord("X"))
+        assert isinstance(state.overlay, overlay.Choose)
+        _run(state)
+        assert not any(call[0] == "remove" for call in _fake(state).calls)
+        app.key(state, 10)  # the first option — wait for the node
+        _run(state)
+        assert ("remove", ("kitchen-relay", False)) in _fake(state).calls, "no second window"
+
+    def test_esc_removes_nothing(self, state: State) -> None:
+        self.nodes(state)
+        app.key(state, ord("X"))
+        app.key(state, 27)
+        _run(state)
+        assert state.overlay is None
+        assert not any(call[0] == "remove" for call in _fake(state).calls)
+
+    def test_after_removal_the_list_drops_the_node(self, state: State) -> None:
+        """The node under the cursor is the one just removed — asking the hub about it
+        must not stop the whole view from refreshing (it did: the list kept the removed
+        node and every refresh failed again on it)."""
+        self.nodes(state)
+        app.key(state, ord("X"))
+        app.key(state, 10)
+        _run(state)
+
+        assert [n.alias for n in state.list_rows()] == ["hall-switch"]
+        assert state.snapshot.error == ""
+        assert state.snapshot.node is None or state.snapshot.node.alias == "hall-switch"
+
+    def test_up_works_at_once_when_the_list_got_shorter(self, state: State) -> None:
+        """A cursor left past the end shows the last row; the first `↑` has to leave it,
+        not only bring the number back in range."""
+        self.nodes(state)
+        state.cursor[Section.NODES] = 5  # the list had six rows a moment ago
+        assert state.selected().alias == "hall-switch"
+        app.key(state, curses.KEY_UP)
+        assert state.selected().alias == "kitchen-relay"
+
+    def test_force_is_the_second_option(self, state: State) -> None:
+        self.nodes(state)
+        app.key(state, ord("X"))
+        app.key(state, 258)  # KEY_DOWN
+        app.key(state, 10)
+        _run(state)
+        assert ("remove", ("kitchen-relay", True)) in _fake(state).calls
+
+    def test_x_in_joining_still_resets_a_stranger(self, state: State) -> None:
+        TestStrangers().joining(
+            state, JoinView(0xAABBCCDD, "CONTROL", address=0x040, state="PENDING")
+        )
+        app.key(state, ord("X"))
+        assert isinstance(state.overlay, overlay.Confirm)
+
+    def test_e_enumerates(self, state: State) -> None:
+        self.nodes(state)
+        app.key(state, ord("E"))
+        _run(state)
+        assert ("enumerate", ("kitchen-relay",)) in _fake(state).calls
+
+    def test_b_blocks_and_on_a_blocked_one_unblocks(self, state: State) -> None:
+        self.nodes(state)
+        app.key(state, ord("B"))
+        _run(state)
+        assert ("block", ("kitchen-relay",)) in _fake(state).calls
+
+        rows = tuple(replace(n, blocked=True) for n in state.snapshot.nodes)
+        state.snapshot = replace(state.snapshot, nodes=rows)
+        app.key(state, ord("B"))
+        _run(state)
+        assert ("unblock", ("kitchen-relay",)) in _fake(state).calls
+
+    def test_b_blocks_a_pending_stranger_by_uid(self, state: State) -> None:
+        TestStrangers().joining(
+            state,
+            JoinView(0xAABBCCDD, "CONTROL", address=0x040, state="PENDING", uid=RELAY),
+        )
+        app.key(state, ord("B"))
+        _run(state)
+        assert ("block", (RELAY,)) in _fake(state).calls
+
+    def test_the_keys_are_offered_on_a_node(self, state: State) -> None:
+        self.nodes(state)
+        keys = dict(panes.context_keys(state))
+        assert keys["X"] == "remove" and keys["E"] == "enumerate" and keys["B"] == "block"

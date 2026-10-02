@@ -91,11 +91,13 @@ class Enumerator:
         request: Request,
         on_ready: Callable[[NodeModel], None] | None = None,
         on_conflict: Callable[[int, Uid, int], None] | None = None,
+        on_failed: Callable[[JoinRecord, str], None] | None = None,
     ) -> None:
         self.installation = installation
         self._request = request
         self._on_ready = on_ready
         self._on_conflict = on_conflict
+        self._on_failed = on_failed
         self._jobs: dict[int, Job] = {}
 
         self.started = 0
@@ -226,6 +228,11 @@ class Enumerator:
         record = self.installation.record(job.short_id)
         record.uid = job.uid
         record.state = NodeState.READY
+        if self.installation.is_blocked(job.uid):
+            # Read, and kept — an unblock then has a model to start from — but not
+            # served (06-cykl-zycia-urzadzenia.md §8). This is how a blocked node that
+            # joined without an address is recognised: only now is its `Uid` known.
+            node.state = record.state = NodeState.BLOCKED
         self.completed += 1
         if self._on_ready is not None:
             self._on_ready(node)
@@ -269,10 +276,15 @@ class Enumerator:
         return previous.name if previous else ""
 
     def _abandon(self, job: Job, reason: str) -> None:
-        del reason  # the log arrives with maintenance, ARCHITEKTURA.md §14.4
+        """Give up. A model the hub already had **stays**: a re-enumeration the operator
+        asked for, ending on a silent node, must not switch that node's bindings off
+        (zadania/zrobione/FEAT-04.md, R9)."""
         self._jobs.pop(job.short_id, None)
-        self.installation.record(job.short_id).state = NodeState.ABSENT
+        record = self.installation.record(job.short_id)
+        record.state = NodeState.ABSENT
         self.failed += 1
+        if self._on_failed is not None:
+            self._on_failed(record, reason)
 
 
 def _width(length: int) -> str:

@@ -438,7 +438,13 @@ def context_keys(state: State) -> tuple[tuple[str, str], ...]:
     if state.section is Section.JOINING:
         selected = state.selected()
         if isinstance(selected, JoinView) and selected.state == "PENDING" and selected.address:
-            return (("y", "admit at its address"), ("X", "reset to factory settings"))
+            return (
+                ("y", "admit at its address"),
+                ("X", "reset to factory settings"),
+                ("B", "block"),
+            )
+        if isinstance(selected, JoinView) and selected.state == "BLOCKED" and selected.uid:
+            return (("B", "unblock"), ("a", "open joining for 15 min"))
         return (("a", "open joining for 15 min"),)
     return ()
 
@@ -454,6 +460,9 @@ def _node_actions(state: State) -> tuple[tuple[str, str], ...]:
         out.append(("c", "send a command"))
     if state.node_ref():
         out += [("i", "Identify"), ("R", "reconcile"), ("n", "name"), ("N", "alias")]
+        selected = state.selected()
+        blocked = isinstance(selected, NodeSummary) and selected.blocked
+        out += [("E", "enumerate"), ("B", "unblock" if blocked else "block"), ("X", "remove")]
     return tuple(out)
 
 

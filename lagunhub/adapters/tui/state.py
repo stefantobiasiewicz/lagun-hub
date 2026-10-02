@@ -34,6 +34,7 @@ from lagunhub.api import (
     HubInfo,
     NodeSummary,
     NodeView,
+    Problem,
     TrafficView,
 )
 
@@ -235,7 +236,7 @@ class State:
                 issues=self.hub.issues(),
                 joining=self.hub.commissioning(),
                 health=self.hub.health(),
-                node=self.hub.node(ref) if ref else None,
+                node=self._node(ref),
                 etag=self.hub.config().etag,
                 at=time.monotonic(),
             )
@@ -246,6 +247,23 @@ class State:
             return
         self.snapshot = fresh  # a wholesale swap — the drawer never sees half of one
         self.dirty = True
+
+    def _node(self, ref: str | None) -> NodeView | None:
+        """The node under the cursor — which may be gone by now.
+
+        `ref` comes from the list as it was **before** this refresh. After a removal it
+        names the node just forgotten, and `NOT_FOUND` is then the true answer, not a
+        failure: treating it as one kept the whole snapshot — the removed node included —
+        and every later refresh failed on the same name (zadania/zrobione/FEAT-04.md).
+        """
+        if not ref:
+            return None
+        try:
+            return self.hub.node(ref)
+        except ApiError as exc:
+            if exc.problem is Problem.NOT_FOUND:
+                return None
+            raise
 
     # --- what is selected --------------------------------------------------------
 
@@ -305,7 +323,12 @@ class State:
         else:
             rows = self.list_rows()
             if rows:
-                latest = self.cursor[self.section]
+                # From the row that is highlighted, not from the stored number: a list
+                # that got shorter (a node removed, a filter typed) leaves the number past
+                # the end, `_under_cursor` shows the last row, and counting from the
+                # number made the first `↑` land on that same row — a key that seemed
+                # dead.
+                latest = min(self.cursor[self.section], len(rows) - 1)
                 fresh = max(0, min(len(rows) - 1, latest + delta))
                 if fresh != latest:
                     self.cursor[self.section] = fresh

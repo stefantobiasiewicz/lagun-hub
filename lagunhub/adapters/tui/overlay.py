@@ -72,6 +72,9 @@ class Choose:
     on_accept: Accept
     cursor: int = 0
     note: str = ""
+    accept: str = "save"
+    """What `⏎` does, as the last line says it — "remove" when the choice is itself the
+    confirmation."""
 
     def lines(self) -> Sequence[str]:
         return [
@@ -84,7 +87,7 @@ class Choose:
             "",
             *([self.note] if self.note else []),
             *([""] if self.note else []),
-            "⏎ save      Esc cancel",
+            f"⏎ {self.accept}      Esc cancel",
         ]
 
     def key(self, key_sim: int) -> bool:

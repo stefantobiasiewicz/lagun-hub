@@ -64,7 +64,8 @@ class Reconciler:
     def start(self, node: NodeModel) -> bool:
         """Check agreement for every configured attribute of this node."""
         key = bytes(node.uid)
-        if key in self._tasks:
+        if key in self._tasks or self.installation.is_blocked(node.uid):
+            # A blocked node is not configured (06-cykl-zycia-urzadzenia.md §8).
             return False
         task = Task(node=node, pending=list(self._wanted(node)))
         if not task.pending:
@@ -72,6 +73,17 @@ class Reconciler:
         self._tasks[key] = task
         self._step(task)
         return True
+
+    def cancel(self, uid: bytes) -> bool:
+        """Stop reconciling this node — it was removed or blocked.
+
+        Replies already on their way still arrive; `_live` makes them land nowhere,
+        rather than carrying on with writes to a node the hub has let go of.
+        """
+        return self._tasks.pop(bytes(uid), None) is not None
+
+    def _live(self, task: Task) -> bool:
+        return self._tasks.get(bytes(task.node.uid)) is task
 
     # --- what we want ---------------------------------------------------------
 
@@ -137,6 +149,8 @@ class Reconciler:
         value: Value,
         outcome: Outcome,
     ) -> None:
+        if not self._live(task):
+            return
         if not outcome.answered:
             self._abandon(task, f"ep{endpoint} {meta.name}: the node does not answer")
             return
@@ -182,6 +196,8 @@ class Reconciler:
         )
 
     def _wrote(self, task: Task, endpoint: int, meta: AttributeDef, outcome: Outcome) -> None:
+        if not self._live(task):
+            return
         task.pending.pop(0)
         if not outcome.answered:
             self._abandon(task, f"ep{endpoint} {meta.name}: the node does not answer")

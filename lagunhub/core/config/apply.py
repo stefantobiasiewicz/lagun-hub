@@ -14,6 +14,7 @@ from lagunhub.core.model import BindingSpec, Installation, Source, Uid
 def apply(installation: Installation, config: Config) -> None:
     """Load the configuration into the model. Only CORE calls this."""
     installation.wanted = {entry.uid: entry for entry in config.nodes}
+    installation.blocked = frozenset(entry.uid for entry in config.nodes if entry.blocked)
     installation.bindings = [spec for binding in config.bindings for spec in _specs(binding)]
     for uid, node in installation.nodes.items():
         wanted = config.node(uid)

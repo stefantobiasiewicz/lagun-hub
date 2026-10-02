@@ -40,11 +40,13 @@ HELP: Final[tuple[str, ...]] = (
     "",
     "on a node:     t Toggle   o On   f Off   i Identify   R reconcile",
     "               n name     N alias        c send a command",
+    "               E enumerate again   B block / unblock   X remove from the hub",
     "on an attribute: e edit in the file   w set on the node",
     "               u remove from the file  g read from the node",
     "               p adopt the value from the node INTO THE FILE",
     "bindings:      + add     - remove",
     "joining:       a open    y admit a PENDING node   X reset it to factory",
+    "               B block a PENDING node — the hub then ignores it",
     "",
     "e goes to the FILE, and reaches the node by reconciling.",
     "w goes STRAIGHT to the node and does not touch the file.",
@@ -253,6 +255,89 @@ def _factory_reset(state: State) -> None:
         prompt="type the ShortId to confirm:",
         on_accept=carry_out,
     )
+
+
+def _x(state: State) -> None:
+    """`X` is the irreversible key in two places: a stranger is reset, a node is removed."""
+    if state.section is Section.NODES:
+        _remove_node(state)
+    else:
+        _factory_reset(state)
+
+
+REMOVE_WAIT: Final = "remove — the node confirms its reset first"
+REMOVE_FORCE: Final = "force — send the reset, do not wait, forget it anyway"
+
+
+def _remove_node(state: State) -> None:
+    """Forget a node: the hub, the file and its bindings (06-cykl-zycia-urzadzenia.md §6).
+
+    One window: choosing the mode **is** the confirmation, `Esc` backs out. No retyping
+    of the alias, unlike the factory reset of a stranger — the user found it pointless
+    here (zadania/zrobione/FEAT-04.md): the node is named in the window, and an ordinary removal
+    does nothing until the node itself confirms.
+    """
+    ref = state.node_ref()
+    if ref is None:
+        return
+
+    def carry_out(mode: Any) -> None:
+        force = mode == REMOVE_FORCE
+
+        def task() -> str:
+            view = state.hub.remove(ref, force=force)
+            state.reload()
+            if view.acknowledged:
+                how = "the node confirmed and goes back to joining"
+            else:
+                how = "not confirmed — it may come back as PENDING"
+            return f"{ref}: removed, {view.bindings} binding(s) with it — {how}"
+
+        state.worker.submit(task)
+
+    state.overlay = overlay.Choose(
+        title="Remove from the hub?",
+        subject=f"{ref} gets a factory reset; the hub forgets it, its entry and bindings",
+        options=(REMOVE_WAIT, REMOVE_FORCE),
+        on_accept=carry_out,
+        note="force is for a module that is dead or already off the wall",
+        accept="remove",
+    )
+
+
+def _enumerate(state: State) -> None:
+    ref = state.node_ref()
+    if ref is None:
+        return
+
+    def task() -> str:
+        view = state.hub.enumerate(ref)
+        return f"{ref}: enumeration {'started' if view.started else 'did not start'}"
+
+    state.worker.submit(task)
+
+
+def _block(state: State) -> None:
+    """`B` toggles: a blocked node is unblocked. Goes to the file, like every decision
+    about the installation (06-cykl-zycia-urzadzenia.md §8)."""
+    selected = state.selected()
+    if state.section is Section.NODES and isinstance(selected, NodeSummary):
+        ref, blocked = selected.alias or selected.uid, selected.blocked
+    elif state.section is Section.JOINING and isinstance(selected, JoinView) and selected.uid:
+        ref, blocked = selected.uid, selected.state == "BLOCKED"
+    else:
+        state.say("! choose a node — in joining, one the hub has read")
+        return
+
+    def task() -> str:
+        if blocked:
+            state.hub.unblock(ref)
+        else:
+            state.hub.block(ref)
+        state.reload()
+        return f"{ref}: {'unblocked — reading it again' if blocked else 'blocked'}"
+
+    state.worker.submit(task)
 
 
 def _reconcile(state: State) -> None:
@@ -491,7 +576,9 @@ _LETTERS: Final[dict[int, Callable[[State], None]]] = {
     ord("i"): _identify,
     ord("a"): _accept,
     ord("y"): _admit,
-    ord("X"): _factory_reset,
+    ord("X"): _x,
+    ord("E"): _enumerate,
+    ord("B"): _block,
     ord("R"): _reconcile,
     ord("e"): _edit,
     ord("w"): _set_on_node,

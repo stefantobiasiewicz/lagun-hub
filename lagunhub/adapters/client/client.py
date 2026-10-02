@@ -42,6 +42,7 @@ from lagunhub.api import (
     ConfigView,
     DiffRow,
     EndpointView,
+    EnumerateView,
     EventView,
     HealthView,
     HubInfo,
@@ -49,6 +50,7 @@ from lagunhub.api import (
     NodeView,
     Problem,
     ReconcileView,
+    RemoveView,
     TrafficView,
 )
 
@@ -76,6 +78,10 @@ class Hub(Protocol):
     def write(self, ref: str, endpoint: int, attribute: str, value: Any) -> ActionView: ...
     def read(self, ref: str, endpoint: int, attribute: str) -> ActionView: ...
     def identify(self, ref: str, seconds: int = 5) -> ActionView: ...
+    def remove(self, ref: str, *, force: bool = False) -> RemoveView: ...
+    def enumerate(self, ref: str) -> EnumerateView: ...
+    def block(self, ref: str) -> ConfigView: ...
+    def unblock(self, ref: str) -> ConfigView: ...
     def accept_new(self, seconds: float = 900.0) -> CommissioningView: ...
     def admit(self, short_id: int) -> CommissioningView: ...
     def factory_reset(self, short_id: int) -> ActionView: ...
@@ -173,6 +179,20 @@ class HubClient:
         return _build(
             ActionView, self._call("POST", f"/nodes/{_quote(ref)}/identify", {"seconds": seconds})
         )
+
+    def remove(self, ref: str, *, force: bool = False) -> RemoveView:
+        return _build(
+            RemoveView, self._call("POST", f"/nodes/{_quote(ref)}/remove", {"force": force})
+        )
+
+    def enumerate(self, ref: str) -> EnumerateView:
+        return _build(EnumerateView, self._call("POST", f"/nodes/{_quote(ref)}/enumerate"))
+
+    def block(self, ref: str) -> ConfigView:
+        return _build(ConfigView, self._call("POST", f"/nodes/{_quote(ref)}/block"))
+
+    def unblock(self, ref: str) -> ConfigView:
+        return _build(ConfigView, self._call("POST", f"/nodes/{_quote(ref)}/unblock"))
 
     def accept_new(self, seconds: float = 900.0) -> CommissioningView:
         return _build(

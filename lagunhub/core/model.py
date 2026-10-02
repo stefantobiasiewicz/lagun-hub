@@ -65,14 +65,22 @@ class NodeWanted(Protocol):
 
 class NodeState(Enum):
     """The state the hub keeps for every `ShortId` it has ever seen
-    (06-cykl-zycia-urzadzenia.md §1.2)."""
+    (06-cykl-zycia-urzadzenia.md §1.2).
+
+    There is no state for a removed node, and there used to be one — `RETIRED`. It kept
+    a note ("this `ShortId` may speak up again") that nothing acted on: a retired record
+    was treated exactly like a missing one. Removing now forgets the record, and the
+    state that stays is `BLOCKED` — a node the hub knows and deliberately does not serve
+    (lagunbus-spec/DECYZJE.md, "Usunięcie: zapomnienie w dwóch trybach; zablokowanie
+    osobno").
+    """
 
     UNKNOWN = auto()
     PENDING = auto()
     JOINED = auto()
     READY = auto()
     ABSENT = auto()
-    RETIRED = auto()
+    BLOCKED = auto()
 
 
 @dataclass(slots=True)
@@ -113,7 +121,7 @@ class AddressPool:
         A separate set, not `_taken`, because it answers a different question: `_taken`
         is what the database says, `_heard` is what the bus says — and the two part ways
         exactly when it matters: a database restored from a backup older than some node's
-        joining, or a retired node that never got its `FactoryReset`. Kept in memory only:
+        joining, or a removed node that never got its `FactoryReset`. Kept in memory only:
         after a restart every working node is heard again within one reporting period,
         and an address of a node removed for good stays blocked until then — out of two
         thousand, no cost at all."""
@@ -283,6 +291,16 @@ class Installation:
     wanted: dict[Uid, NodeWanted] = field(default_factory=dict)
     """Configuration per node — including ones the hub has not seen yet."""
 
+    blocked: frozenset[Uid] = frozenset()
+    """Nodes the operator told the hub not to serve — from the configuration file,
+    keyed by `Uid` (06-cykl-zycia-urzadzenia.md §8).
+
+    The file and not the database, for two reasons: the block has to survive a restart,
+    and the hub does not keep its database yet; and an address — the only thing a
+    database would add — changes when the node is admitted again, while the `Uid` never
+    does.
+    """
+
     issues: list[str] = field(default_factory=list)
     """Things needing the operator’s attention. The hub does not guess at them, it shows
     them
@@ -295,6 +313,28 @@ class Installation:
         if node.address:
             self.by_address[node.address] = node.uid
             self.addresses.reserve(node.address)
+        return node
+
+    def is_blocked(self, uid: Uid | None) -> bool:
+        return uid is not None and uid in self.blocked
+
+    def forget(self, uid: Uid) -> NodeModel | None:
+        """Remove a node **without a trace** — the model, its address and every join record
+        that names it (06-cykl-zycia-urzadzenia.md §6).
+
+        The address goes back to the pool but stays *heard*: whether the node really let
+        go of it is for the caller to say, once the node acknowledged its reset.
+        """
+        node = self.nodes.pop(uid, None)
+        if node is not None and node.address:
+            if self.by_address.get(node.address) == uid:
+                del self.by_address[node.address]
+            self.addresses.release(node.address)
+        for short_id, record in list(self.records.items()):
+            if record.uid == uid or (node is not None and short_id == node.short_id):
+                if record.address and record.address not in self.by_address:
+                    self.addresses.release(record.address)
+                del self.records[short_id]
         return node
 
     def record(self, short_id: int) -> JoinRecord:
@@ -325,14 +365,13 @@ class Installation:
         when the address is a stranger's (06-cykl-zycia-urzadzenia.md §2.3).
 
         The bus is deliberately ignored: an address known on another bus is not a
-        stranger but a conflict, and `foreign_record_at` handles that. A retired record
-        holds nothing — its address went back to the pool.
+        stranger but a conflict, and `foreign_record_at` handles that.
         """
         uid = self.by_address.get(address)
         if uid is not None:
             return uid
         for record in self.records.values():
-            if record.address == address and record.state != NodeState.RETIRED:
+            if record.address == address:
                 return record
         return None
 
@@ -429,6 +468,11 @@ class Installation:
         bind: dict[Source, tuple[Target, ...]] = {}
         on_report: dict[Source, tuple[Target, ...]] = {}
         for spec in self.bindings:
+            if self.is_blocked(spec.source[0]) or self.is_blocked(spec.target_uid):
+                # A blocked node triggers nothing and is the target of nothing
+                # (06-cykl-zycia-urzadzenia.md §8). Dropped here, from the image, so the
+                # fast path needs no check of its own — it never sees the binding.
+                continue
             targets = self._compile(spec)
             if not targets:
                 continue

@@ -17,6 +17,7 @@ import pytest
 
 from lagunhub.core.config.loader import ConfigError
 from lagunhub.core.config.store import ConfigStore, ConflictError
+from lagunhub.core.model import Uid
 from tests.conftest import Clock
 from tests.test_enumeration import Rig
 
@@ -59,6 +60,7 @@ def store(directory: Path) -> ConfigStore:
 
 
 ENDPOINT = "nodes/08090a0b0c0d0e0f/endpoints/4"
+RELAY = Uid(bytes.fromhex("08090a0b0c0d0e0f"))
 
 
 class TestVersioning:
@@ -264,6 +266,69 @@ class TestSingleFile:
         store.set(_path(f"{ENDPOINT}/AutoOffTime"), 30, etag=store.etag)
         assert "AutoOffTime" in file_.read_text(encoding="utf-8")
         assert store.load().nodes[0].endpoints[4].attributes
+
+
+class TestForgettingANode:
+    """The file half of removing a node — 06-cykl-zycia-urzadzenia.md §6."""
+
+    NODES = (
+        NODES
+        + """\
+  "0001020304050607":
+    alias: kitchen-switch
+  "1011121314151617":
+    alias: hall-switch
+"""
+    )
+    BINDINGS = """\
+# Bindings — this comment is to survive the node going.
+bindings:
+  - from: { node: kitchen-switch, endpoint: 4, type: KeyInput, event: Click }
+    to:   { node: kitchen-relay, endpoint: 4, type: Output, command: Toggle }
+  - from: { node: hall-switch, endpoint: 4, type: KeyInput, event: Click }
+    to:
+      - { node: "08090a0b0c0d0e0f", endpoint: 4, type: Output, command: Toggle }
+      - { group: all-lights, endpoint: 4, type: Output, command: "Off" }
+  - from: { node: hall-switch, endpoint: 4, type: KeyInput, event: HoldStart }
+    to:   { group: all-lights, endpoint: 4, type: Output, command: "On" }
+"""
+
+    @pytest.fixture
+    def full(self, directory: Path) -> ConfigStore:
+        (directory / "nodes.yaml").write_text(self.NODES, encoding="utf-8")
+        (directory / "bindings.yaml").write_text(self.BINDINGS, encoding="utf-8")
+        return ConfigStore(directory)
+
+    def test_the_node_and_its_bindings_go(self, full: ConfigStore) -> None:
+        config, removed = full.forget_node(RELAY, etag=full.etag)
+
+        assert config.node(RELAY) is None
+        assert removed == 1, "only the binding left with no target goes whole"
+        assert len(config.bindings) == 2
+        assert [t.group for t in config.bindings[0].targets] == [1], (
+            "a binding with several targets loses only this node's — named here by Uid"
+        )
+
+    def test_as_a_source_its_bindings_go_too(self, full: ConfigStore) -> None:
+        config, removed = full.forget_node(bytes.fromhex("1011121314151617"), etag=full.etag)
+        assert removed == 2
+        assert len(config.bindings) == 1
+
+    def test_comments_survive(self, full: ConfigStore, directory: Path) -> None:
+        full.forget_node(RELAY, etag=full.etag)
+        assert "# Bindings — this comment" in (directory / "bindings.yaml").read_text("utf-8")
+        assert "# The key is the Uid" in (directory / "nodes.yaml").read_text("utf-8")
+
+    def test_a_stale_etag_is_refused(self, full: ConfigStore, directory: Path) -> None:
+        before = (directory / "nodes.yaml").read_text("utf-8")
+        with pytest.raises(ConflictError):
+            full.forget_node(RELAY, etag="sha256:stale")
+        assert (directory / "nodes.yaml").read_text("utf-8") == before
+
+    def test_a_node_not_in_the_file_changes_nothing(self, full: ConfigStore) -> None:
+        config, removed = full.forget_node(bytes(range(32, 40)), etag=full.etag)
+        assert removed == 0
+        assert len(config.nodes) == 3
 
 
 class TestWatching:

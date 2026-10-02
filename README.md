@@ -75,6 +75,12 @@ The devices join, the hub enumerates and reconciles them, and `1` in the key's w
 toggles the relay through the binding in `config/bindings.yaml`. Or start **0 · Stack**
 in PyCharm.
 
+To take a device out and plug it in again: `X` on the node in the view removes it — the
+simulator acknowledges the factory reset, restarts without an address and waits as
+`PENDING` in **joining**; `a` there admits it again. Removing also takes the node's entry
+and its bindings out of the (temporary) configuration. `B` blocks a node instead — the hub
+keeps it and ignores it — and `E` reads it again (`ARCHITEKTURA.md` §8.4).
+
 | | |
 |---|---|
 | `--udp [GROUP[:PORT]]` | **test only**: one bus over UDP multicast on this machine (default `239.255.76.66:7607`) instead of the buses in `hub.yaml`. Deliberately not a kind of bus in the file — a house configuration cannot point at it by mistake. No arbitration between processes: frames arrive in the order they were sent. Format: `../lagunbus-node/README.md` § Decisions |

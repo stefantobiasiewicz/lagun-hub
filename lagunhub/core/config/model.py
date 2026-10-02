@@ -72,6 +72,12 @@ class NodeConfig:
     name: str = ""
     room: str = ""
     endpoints: dict[int, EndpointConfig] = field(default_factory=dict)
+    blocked: bool = False
+    """The hub knows this node and does not serve it (06-cykl-zycia-urzadzenia.md §8).
+
+    A decision about the installation, so it lives here, next to the name — and not in
+    the database, which does not survive a restart yet and would key it by an address
+    that changes."""
 
 
 @dataclass(frozen=True, slots=True)

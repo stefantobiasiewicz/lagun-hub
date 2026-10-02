@@ -3,8 +3,8 @@
 
 A node with an address in persistent storage does not take part in joining
 (03-adresacja.md §5.1), so joining will never bring it in. It happens after the hub's
-database is lost or restored from an old backup, after a retirement whose `FactoryReset`
-did not get through, and when a module used elsewhere is plugged in.
+database is lost or restored from an old backup, after a forced removal whose
+`FactoryReset` did not get through, and when a module used elsewhere is plugged in.
 
 **Every frame is the trigger, not `Booted`.** The hub runs on a Raspberry Pi and comes up
 minutes after the nodes, so their `Booted` is usually gone by then. Every node reports
@@ -84,6 +84,7 @@ class Strangers:
 
         self.probed = 0
         self.pending = 0
+        self.blocked = 0
         self.failed = 0
 
     def __len__(self) -> int:
@@ -147,7 +148,7 @@ class Strangers:
             return
         short_id = value
         record = self.installation.record(short_id)
-        if record.address and record.state != NodeState.RETIRED:
+        if record.address:
             # A `ShortId` the hub holds under another address, with a `Uid` it does not
             # know — the same contradiction as above, seen from the other key.
             self._settle(probe)
@@ -161,9 +162,16 @@ class Strangers:
         record.address = probe.address
         record.bus = probe.bus
         record.uid = probe.uid
-        record.state = NodeState.PENDING
         record.last_seen = self._clock()
         self.installation.addresses.reserve(probe.address)
+        if self.installation.is_blocked(probe.uid):
+            # Recognised, and that is all: no operator decision to wait for, the file
+            # already holds it (06-cykl-zycia-urzadzenia.md §8). The record keeps the
+            # address so the next frame from it is not a stranger's.
+            record.state = NodeState.BLOCKED
+            self.blocked += 1
+            return
+        record.state = NodeState.PENDING
         self.pending += 1
         if self._on_pending is not None:
             self._on_pending(record)
