@@ -579,6 +579,37 @@ block exists not to do.
 leaves the node working as it was and is reported as an issue and a `NODE` event — before
 this, a failed enumeration dropped its reason.
 
+### 8.5 Reading everything
+
+`read_all(node[, endpoint])` reads every readable attribute the node — or one endpoint —
+has, on an operator's request (`G` in the view), worked out in `zadania/zrobione/FEAT-06.md`.
+Before it the hub knew a value only when the node reported it, reconciling read it, or
+somebody pressed `g` on one attribute; a relay with four channels is about 170 of them.
+
+```
+read_all(node)        Readout: one READ after another ── each reply → model (CORE)
+                       └─ returns at once {started, pending}; node().reading counts down
+                       └─ end: NODE event READOUT_DONE "69 read, 12 absent"
+```
+
+- **Not polling.** It runs only when a person asks, like `g`; the hub still listens
+  rather than asks after a restart, and a whole-installation readout is deliberately
+  not offered.
+- **What is not asked:** attributes needing a feature the endpoint did not declare,
+  optional ones the node already turned down (both `EndpointModel.lacks`), and endpoints
+  of a type the hub does not know. Long values (`string`, `blob`) go last.
+- **One after another per node**, like reconciling; several nodes may be read at once.
+  One silence stops it — three attempts already went out.
+- **Refusals.** An optional attribute refused with `UNSUPPORTED_ELEMENT` is remembered in
+  `absent` by `CoreThread._remembering` — for every read, `g` and reconciling included,
+  not by each caller. A *mandatory* one refused is the node failing its type, is not put
+  in `absent` (the API would then claim the device sets it itself), and goes into **one**
+  issue per readout with every other refusal: the node library lacks several common
+  attributes today (`zadania/TASK-01.md`), and an issue each would bury the list.
+- **Stopped by** removing, blocking or enumerating the node — enumeration builds a new
+  model, whoever started it (`Enumerator`'s `on_start`). Refused with `CONFLICT` while
+  the node is being enumerated or already read; alongside reconciling it is allowed.
+
 ### 8.2 Dlaczego model ma dwie tablice
 
 Między przydziałem adresu a enumeracją hub jest w stanie, który łatwo przeoczyć przy
@@ -815,6 +846,7 @@ Rozstrzygnięcia z pisania widoku:
 | dolny panel | **ramki** (`GET /frames`), nie zdarzenia semantyczne | to one czynią z widoku narzędzie diagnostyczne; zdarzenia widać i tak w listach wyżej |
 | sekcje i głębokość | sekcje na `⇥`, `← →` chodzi **w głąb** | strzałki w bok obok strzałek w górę i w dół muszą znaczyć „to samo, w drugiej osi" |
 | uzgodnienie rozjazdu | `R`, nie `r` | `r` odświeża wszędzie; dwa znaczenia jednego klawisza to pułapka |
+| reading everything | `G`, a capital `g`; inside an endpoint only that one | the same split as `g` against `R`: the key under the cursor's scope. Progress shows in the pane title, because the view polls rather than listens (§14.5) |
 | `p` — przyjmij wartość z węzła do pliku | **jest, ale tylko jawnie** | łamie zasadę „plik → węzeł, nigdy odwrotnie", więc wolno tylko człowiekowi; bez tego jedyną drogą jest ręczna edycja pliku |
 | ręczne wyzwolenie powiązania | **nie ma** | nowa operacja w API, a w dzienniku trudna do odróżnienia od prawdziwego zdarzenia |
 | komendy z argumentami w powiązaniu | tylko bezargumentowe | argumenty dokłada się w pliku |
@@ -823,8 +855,7 @@ Rozstrzygnięcia z pisania widoku:
 
 **Czego widok jeszcze nie pokazuje, bo hub tego nie liczy** — w tych miejscach stoi
 kreska, **lepiej kreska niż zmyślona liczba**: kiedy węzeł był ostatnio słyszany (próg
-ciszy przyjdzie z wykrywaniem nieobecności, §14), `Uptime` i liczniki błędów (hub czyta
-`Device` raz, przy enumeracji), ile razy zadziałało dane powiązanie (`BindingEngine` liczy
+ciszy przyjdzie z wykrywaniem nieobecności, §14), ile razy zadziałało dane powiązanie (`BindingEngine` liczy
 sumy), numer wiersza w pliku konfiguracji (`ruamel` go zna, API nie wystawia) i histogram
 w czasie (`Latency` trzyma próbki, nie szereg).
 
@@ -870,6 +901,8 @@ POST /commissioning/{ShortId}/admit         przyjmij węzeł PENDING spod jego a
 POST /commissioning/{ShortId}/factory-reset reset fabryczny węzła PENDING (§8.3)
 POST /nodes/{uid}/remove                     forget the node; {"force": true} does not wait (§8.4)
 POST /nodes/{uid}/enumerate                  read the node again (§8.4)
+POST /nodes/{uid}/read-all                   read every attribute, in the background (§8.5)
+POST /nodes/{uid}/ep/{n}/read-all            the same for one endpoint (§8.5)
 POST /nodes/{uid}/block                      blocked: true in the file (§8.4)
 POST /nodes/{uid}/unblock                    the field goes; the node is read again (§8.4)
 GET  /events                                 SSE — zdarzenia i zmiany stanu na żywo
@@ -1027,6 +1060,7 @@ hub/                         ← repozytorium
 │   │   ├── strangers.py     node at an unknown address → PENDING (§8.3)
 │   │   ├── enumeration.py   odczyt tożsamości i deskryptora
 │   │   ├── reconcile.py     uzgadnianie konfiguracji z węzłami
+│   │   ├── readout.py       reading every attribute on request (§8.5)
 │   │   ├── events.py        strumień zdarzeń dla adapterów
 │   │   ├── metrics.py       histogram opóźnień
 │   │   ├── config/          decyzje człowieka: wczytanie, walidacja, ZAPIS

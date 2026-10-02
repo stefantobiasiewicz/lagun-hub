@@ -30,6 +30,7 @@ from lagunhub.api import (
     NodeSummary,
     NodeView,
     Problem,
+    ReadoutView,
     ReconcileView,
     RemoveView,
     TrafficView,
@@ -259,6 +260,10 @@ class FakeHub:
     def enumerate(self, ref: str) -> EnumerateView:
         self._record("enumerate", ref)
         return EnumerateView(started=True, running=1)
+
+    def read_all(self, ref: str, endpoint: int | None = None) -> ReadoutView:
+        self._record("read_all", ref, endpoint)
+        return ReadoutView(started=True, pending=81, running=1)
 
     def block(self, ref: str) -> ConfigView:
         self._record("block", ref)

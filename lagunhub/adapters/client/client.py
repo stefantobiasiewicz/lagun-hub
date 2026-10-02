@@ -49,6 +49,7 @@ from lagunhub.api import (
     NodeSummary,
     NodeView,
     Problem,
+    ReadoutView,
     ReconcileView,
     RemoveView,
     TrafficView,
@@ -80,6 +81,7 @@ class Hub(Protocol):
     def identify(self, ref: str, seconds: int = 5) -> ActionView: ...
     def remove(self, ref: str, *, force: bool = False) -> RemoveView: ...
     def enumerate(self, ref: str) -> EnumerateView: ...
+    def read_all(self, ref: str, endpoint: int | None = None) -> ReadoutView: ...
     def block(self, ref: str) -> ConfigView: ...
     def unblock(self, ref: str) -> ConfigView: ...
     def accept_new(self, seconds: float = 900.0) -> CommissioningView: ...
@@ -187,6 +189,10 @@ class HubClient:
 
     def enumerate(self, ref: str) -> EnumerateView:
         return _build(EnumerateView, self._call("POST", f"/nodes/{_quote(ref)}/enumerate"))
+
+    def read_all(self, ref: str, endpoint: int | None = None) -> ReadoutView:
+        where = f"/nodes/{_quote(ref)}" + (f"/ep/{endpoint}" if endpoint is not None else "")
+        return _build(ReadoutView, self._call("POST", f"{where}/read-all"))
 
     def block(self, ref: str) -> ConfigView:
         return _build(ConfigView, self._call("POST", f"/nodes/{_quote(ref)}/block"))

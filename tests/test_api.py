@@ -23,6 +23,7 @@ from lagunhub.api import ApiError, HubApi, Problem
 from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.config.store import ConfigStore
+from lagunhub.core.model import Uid
 from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.endpoints import output as out
 from lagunhub.protocol.registry import CommonAttribute
@@ -205,6 +206,37 @@ class TestControl:
         result = hub.api.read("kitchen-relay", 4, "OnOff")
         assert result.ok and result.data == "01"
 
+    def test_a_read_learns_an_optional_attribute_the_node_lacks(self, hub: Hub) -> None:
+        """The refusal lands in the model the way every reply does, so a read teaches the
+        hub as much as reconciling does (zadania/zrobione/FEAT-06.md, R9)."""
+        hub.join(key1(uid=SWITCH_UID, address=0, clock=hub.inst.clock, name="sw"))
+        with pytest.raises(ApiError) as first:
+            hub.api.read("kitchen-switch", 4, "HoldTickInterval")
+        assert first.value.problem is Problem.REFUSED
+        switch = hub.inst.installation.nodes[Uid(SWITCH_UID)]
+        assert ki.HOLD_TICK_INTERVAL in switch.endpoints[4].absent
+
+        before = hub.api.health().transactions["opened"]
+        with pytest.raises(ApiError) as second:
+            hub.api.read("kitchen-switch", 4, "HoldTickInterval")
+        assert second.value.problem is Problem.INVALID
+        assert "does not expose" in second.value.message
+        assert hub.api.health().transactions["opened"] == before, "the node is not asked again"
+
+    def test_a_refused_mandatory_attribute_is_not_taken_for_absent(
+        self, hub: Hub, relay: NodeCore
+    ) -> None:
+        """A device may leave out only what the type calls optional. Refusing a mandatory
+        one is the node's fault, and calling it "set by the device itself" would lie
+        (zadania/zrobione/FEAT-06.md, R8)."""
+        # The node library's functional endpoints lack `Enabled` today (zadania/TASK-01.md).
+        relay.endpoint(4, Output).spec.pop(CommonAttribute.Enabled)
+        with pytest.raises(ApiError) as error:
+            hub.api.read("kitchen-relay", 4, "Enabled")
+        assert error.value.result == "UNSUPPORTED_ELEMENT"
+        node = hub.inst.installation.nodes[Uid(RELAY_UID)]
+        assert CommonAttribute.Enabled not in node.endpoints[4].absent
+
     def test_identify_needs_no_knowledge_of_endpoints(self, hub: Hub, relay: NodeCore) -> None:
         assert hub.api.identify("kitchen-relay", seconds=3).ok
 
@@ -245,6 +277,63 @@ class TestControl:
         assert hub.api.accept_new(60.0).accepting is True
         hub.inst.run(90.0, step=1.0)
         assert hub.api.commissioning().accepting is False
+
+
+class TestReadingEverything:
+    """`read_all` — every readable attribute, in the background (zadania/zrobione/FEAT-06.md)."""
+
+    def test_it_returns_at_once_and_fills_the_node_view(self, hub: Hub, relay: NodeCore) -> None:
+        before = hub.api.node("kitchen-relay")
+        view = hub.api.read_all("kitchen-relay")
+        assert view.started and view.pending > 0
+
+        during = hub.api.node("kitchen-relay")
+        assert during.reading is not None and 0 < during.reading <= view.pending, "not waited"
+
+        hub.inst.run(3.0)
+        after = hub.api.node("kitchen-relay")
+        assert after.reading is None
+        empty = sum(1 for e in before.detail for a in e.attributes if a.value is None)
+        still = sum(1 for e in after.detail for a in e.attributes if a.value is None)
+        assert still < empty
+
+    def test_one_endpoint(self, hub: Hub, relay: NodeCore) -> None:
+        whole = hub.api.read_all("kitchen-relay")
+        hub.inst.run(3.0)
+        one = hub.api.read_all("kitchen-relay", endpoint=4)
+        assert 0 < one.pending < whole.pending
+
+    def test_a_second_one_is_a_conflict(self, hub: Hub, relay: NodeCore) -> None:
+        hub.api.read_all("kitchen-relay")
+        with pytest.raises(ApiError) as error:
+            hub.api.read_all("kitchen-relay")
+        assert error.value.problem is Problem.CONFLICT
+
+    def test_not_during_enumeration(self, hub: Hub, relay: NodeCore) -> None:
+        """The model is about to be replaced (R5)."""
+        hub.api.enumerate("kitchen-relay")
+        with pytest.raises(ApiError) as error:
+            hub.api.read_all("kitchen-relay")
+        assert error.value.problem is Problem.CONFLICT
+
+    def test_an_endpoint_it_does_not_have(self, hub: Hub, relay: NodeCore) -> None:
+        with pytest.raises(ApiError) as error:
+            hub.api.read_all("kitchen-relay", endpoint=9)
+        assert error.value.problem is Problem.NOT_FOUND
+
+    def test_a_node_without_an_address(self, hub: Hub) -> None:
+        with pytest.raises(ApiError) as error:
+            hub.api.read_all("kitchen-relay")
+        assert error.value.problem is Problem.UNAVAILABLE
+
+    def test_the_end_is_an_event(self, hub: Hub, relay: NodeCore) -> None:
+        with hub.inst.core.events.subscribe() as events:
+            hub.api.read_all("kitchen-relay")
+            hub.inst.run(3.0)
+            seen = list(iter(lambda: events.get(0), None))
+        (done,) = [e for e in seen if e.name == "READOUT_DONE"]
+        assert done.uid == Uid(RELAY_UID)
+        assert " read" in done.text
 
 
 class TestHealth:
@@ -428,6 +517,7 @@ class TestPromises:
         out of three would forget."""
         views: tuple[Any, ...] = (
             hub.api.node("kitchen-relay"),
+            hub.api.read_all("kitchen-relay"),
             hub.api.health(),
             hub.api.commissioning(),
             *hub.api.bindings(),

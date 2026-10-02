@@ -810,6 +810,37 @@ class TestNodeLifecycle:
         _run(state)
         assert ("enumerate", ("kitchen-relay",)) in _fake(state).calls
 
+    def test_capital_g_reads_the_whole_node_from_the_list(self, state: State) -> None:
+        """`G` — a capital `g`: everything instead of one attribute
+        (zadania/zrobione/FEAT-06.md)."""
+        self.nodes(state)
+        app.key(state, ord("G"))
+        _run(state)
+        assert ("read_all", ("kitchen-relay", None)) in _fake(state).calls
+
+    def test_capital_g_inside_an_endpoint_reads_only_it(self, expanded: State) -> None:
+        state = expanded
+        _into_ep4(state)
+        app.key(state, ord("G"))
+        _run(state)
+        assert ("read_all", ("kitchen-relay", 4)) in _fake(state).calls
+
+    def test_the_title_says_a_readout_is_running(self, expanded: State) -> None:
+        """The view polls and does not listen, so progress comes from the node view
+        (R10)."""
+        state = expanded
+        node = state.snapshot.node
+        assert node is not None
+        assert "reading" not in panes.details(state).title
+        state.snapshot = replace(state.snapshot, node=replace(node, reading=42))
+        assert "reading, 42 left" in panes.details(state).title
+        _into_ep4(state)
+        assert "reading, 42 left" in panes.details(state).title
+
+    def test_capital_g_is_offered(self, state: State) -> None:
+        self.nodes(state)
+        assert ("G", "read everything") in panes.context_keys(state)
+
     def test_b_blocks_and_on_a_blocked_one_unblocks(self, state: State) -> None:
         self.nodes(state)
         app.key(state, ord("B"))

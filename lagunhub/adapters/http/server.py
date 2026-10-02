@@ -210,6 +210,16 @@ def routes(api: HubApi) -> list[Route]:
         ),
         (
             "POST",
+            re.compile(r"^/nodes/([^/]+)/read-all$"),
+            lambda r: Response(body=api.read_all(r.args[0])),
+        ),
+        (
+            "POST",
+            re.compile(r"^/nodes/([^/]+)/ep/(\d+)/read-all$"),
+            lambda r: Response(body=api.read_all(r.args[0], r.number(1))),
+        ),
+        (
+            "POST",
             re.compile(r"^/nodes/([^/]+)/block$"),
             lambda r: Response(body=api.block(r.args[0])),
         ),

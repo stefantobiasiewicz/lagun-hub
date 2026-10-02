@@ -103,6 +103,7 @@ Te same ścieżki, tylko bez czekania na zegar:
 | powtórzenia, deduplikację, ciszę węzła | `tests/test_e2e.py`, `tests/test_transactions.py` |
 | jak węzeł bez adresu wchodzi do instalacji | `tests/test_enumeration.py` |
 | doprowadzanie węzła do zgodności z plikiem | `tests/test_reconcile.py` |
+| reading every attribute of a node on request | `tests/test_readout.py` |
 
 ```sh
 .venv/bin/python -m pytest tests/test_e2e.py -v
@@ -304,6 +305,7 @@ i token bierze sam z `config/`, więc zwykle wystarcza `lagun-hub tui`; inaczej
 | `e` `w` | edytuj **w pliku** / nastaw **w węźle** |
 | `u` `g` `p` | usuń z pliku / odczytaj z węzła / przyjmij z węzła do pliku |
 | `R` | uzgodnij ten węzeł teraz |
+| `G` | read everything from the node in the background — inside an endpoint, only that endpoint; the pane title counts down what is left |
 | `+` `-` | dodaj / usuń powiązanie |
 | `/` `spacja` `r` `?` | filtr / pauza podglądu / odśwież / pomoc |
 | `q` | **jedyne** wyjście — klawisz nawigacji nigdy nie zamyka widoku |

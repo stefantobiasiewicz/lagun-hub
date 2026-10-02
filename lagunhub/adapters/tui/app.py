@@ -41,6 +41,7 @@ HELP: Final[tuple[str, ...]] = (
     "on a node:     t Toggle   o On   f Off   i Identify   R reconcile",
     "               n name     N alias        c send a command",
     "               E enumerate again   B block / unblock   X remove from the hub",
+    "               G read everything from the node — inside an endpoint, only that one",
     "on an attribute: e edit in the file   w set on the node",
     "               u remove from the file  g read from the node",
     "               p adopt the value from the node INTO THE FILE",
@@ -317,6 +318,29 @@ def _enumerate(state: State) -> None:
     state.worker.submit(task)
 
 
+def _read_all(state: State) -> None:
+    """`G`, a capital `g`: every attribute instead of one (zadania/zrobione/FEAT-06.md).
+
+    Inside an endpoint it reads that endpoint, anywhere else on the node the whole node —
+    the same split as `g` against `R`. It returns at once; the values fill the pane as the
+    lists are polled, and the title counts down what is left.
+    """
+    ref = state.node_ref()
+    if ref is None:
+        return
+    endpoint = state.endpoint  # set exactly when the pane shows an endpoint's attributes
+
+    def task() -> str:
+        view = state.hub.read_all(ref, endpoint)
+        state.reload()
+        where = f"{ref} ep{endpoint}" if endpoint is not None else ref
+        if not view.started:
+            return f"{where}: there is nothing to read"
+        return f"{where}: reading {view.pending} attributes"
+
+    state.worker.submit(task)
+
+
 def _block(state: State) -> None:
     """`B` toggles: a blocked node is unblocked. Goes to the file, like every decision
     about the installation (06-cykl-zycia-urzadzenia.md §8)."""
@@ -584,6 +608,7 @@ _LETTERS: Final[dict[int, Callable[[State], None]]] = {
     ord("w"): _set_on_node,
     ord("u"): _remove,
     ord("g"): _read,
+    ord("G"): _read_all,
     ord("p"): _adopt,
     ord("r"): _refresh,
     ord("c"): _command_to_endpoint,

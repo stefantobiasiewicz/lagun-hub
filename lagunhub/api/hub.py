@@ -56,6 +56,7 @@ from lagunhub.api.views import (
     NodeSummary,
     NodeView,
     Plain,
+    ReadoutView,
     ReconcileView,
     RemoveView,
     TargetView,
@@ -371,6 +372,30 @@ class HubApi:
 
         return self._ask(order)
 
+    def read_all(self, ref: str, endpoint: int | None = None) -> ReadoutView:
+        """Read every readable attribute of the node — or of one endpoint — from the node
+        into the hub's memory (zadania/zrobione/FEAT-06.md).
+
+        Returns at once, like `enumerate`: the reads go one after another in the
+        background, and each reply lands in the model the way a single `read` does. What
+        the endpoint does not have is not asked. The end arrives as a `READOUT_DONE`
+        event; until then `node()` says how many reads are left.
+        """
+
+        def order(inst: Installation) -> ReadoutView:
+            node = self._present(inst, ref)
+            if self.core.enumeration.busy(node.short_id):
+                # Enumeration builds a new model; reading the old one fills nothing (R5).
+                raise ApiError(Problem.CONFLICT, f"{ref}: it is being enumerated — try again after")
+            if self.core.readout.busy(node.uid):
+                raise ApiError(Problem.CONFLICT, f"{ref}: it is already being read")
+            if endpoint is not None:
+                self._functional(inst, ref, endpoint)
+            pending = self.core.readout.start(node, endpoint)
+            return ReadoutView(started=pending > 0, pending=pending, running=len(self.core.readout))
+
+        return self._ask(order)
+
     def block(self, ref: str) -> ConfigView:
         """Tell the hub not to serve this node (06-cykl-zycia-urzadzenia.md §8).
 
@@ -440,10 +465,13 @@ class HubApi:
         memory."""
 
         def assemble(inst: Installation) -> tuple[NodeModel, int, bytes]:
-            node, _, definition = self._functional(inst, ref, endpoint)
+            node, model, definition = self._functional(inst, ref, endpoint)
             meta = self._named(definition.attribute, attribute, "attribute")
             if not meta.readable:
                 raise ApiError(Problem.INVALID, f"{meta.name} is write-only")
+            # What the endpoint does not have is not asked for — the same answer `write`
+            # gives, now that a refused read is remembered too (zadania/zrobione/FEAT-06.md, R9).
+            self._exposed(model, meta, None, ref, endpoint)
             return node, meta.id, b""
 
         return self._act(assemble, endpoint, MessageKind.READ)
@@ -688,6 +716,7 @@ class HubApi:
             device_type=node.device_type if node else 0,
             firmware=node.firmware if node else 0,
             detail=endpoints,
+            reading=self.core.readout.remaining(uid),
         )
 
     def _endpoint(self, inst: Installation, uid: Uid, model: EndpointModel) -> EndpointView:

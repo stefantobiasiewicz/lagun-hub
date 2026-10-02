@@ -112,6 +112,10 @@ class NodeView(NodeSummary):
     device_type: int = 0
     firmware: int = 0
     detail: tuple[EndpointView, ...] = ()
+    reading: int | None = None
+    """Reads still ahead of `read_all` — `None` when the node is not being read. The view
+    polls rather than listens, so this is how it shows progress (zadania/zrobione/FEAT-06.md,
+    R10)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +272,20 @@ class EnumerateView:
 
 
 @dataclass(frozen=True, slots=True)
+class ReadoutView:
+    """Reading everything was started. Like enumeration it returns at once: a relay with
+    four channels is about 170 reads, longer than a request should wait. The values
+    reach the node view as they come, and the end arrives as a `READOUT_DONE` event."""
+
+    started: bool
+    pending: int = 0
+    """How many reads were queued."""
+
+    running: int = 0
+    """How many nodes are being read now, this one included."""
+
+
+@dataclass(frozen=True, slots=True)
 class ReconcileView:
     """How a reconcile request ended."""
 
@@ -332,6 +350,7 @@ __all__ = [
     "NodeSummary",
     "NodeView",
     "Plain",
+    "ReadoutView",
     "ReconcileView",
     "RemoveView",
     "TargetView",

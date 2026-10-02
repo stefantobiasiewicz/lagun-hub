@@ -156,10 +156,11 @@ class Reconciler:
             return
         if outcome.result == ResultCode.UNSUPPORTED_ELEMENT and meta.optional:
             # Not a failure: the device sets this itself (types/0x0010-key-input.md
-            # §2.4). Remembered, so that the API refuses it from now on without asking
-            # the node (zadania/zrobione/CR-01.md, N10).
+            # §2.4). CORE has already remembered it in `absent`, as it does for every
+            # reply, so the API refuses it from now on without asking the node
+            # (zadania/zrobione/CR-01.md, N10; zadania/zrobione/FEAT-06.md, R9). What is left
+            # here is reconciling's own part: the file asks for something that is not.
             task.pending.pop(0)
-            task.node.endpoint(endpoint).absent.add(meta.id)
             self._issue(
                 task.node,
                 f"ep{endpoint}: {task.node.endpoint(endpoint).lacks(meta)} — "

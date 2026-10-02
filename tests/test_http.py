@@ -385,6 +385,16 @@ class TestLifecycle:
         status, view = hub.call("POST", "/nodes/kitchen-relay/enumerate")
         assert status == 200 and view["started"] is True
 
+    def test_read_all_is_started_for_a_node_and_for_an_endpoint(self, hub: Hub) -> None:
+        status, view = hub.call("POST", "/nodes/kitchen-relay/read-all")
+        assert status == 200 and view["started"] is True and view["pending"] > 0
+        status, error = hub.call("POST", "/nodes/kitchen-relay/ep/4/read-all")
+        assert status == 409 and error["problem"] == "conflict", "the first one still runs"
+
+        hub.until(lambda: hub.get("/nodes/kitchen-relay")[1]["reading"] is None, "never ended")
+        status, view = hub.call("POST", "/nodes/kitchen-relay/ep/4/read-all")
+        assert status == 200 and view["pending"] > 0
+
     def test_a_blocked_node_shows_it_and_refuses_commands(self, hub: Hub) -> None:
         assert hub.call("POST", "/nodes/kitchen-relay/block")[0] == 200
         assert hub.get("/nodes/kitchen-relay")[1]["state"] == "BLOCKED"

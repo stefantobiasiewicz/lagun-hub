@@ -32,6 +32,7 @@ from lagunhub.core.model import (
     Target,
     Uid,
 )
+from lagunhub.core.readout import Readout, Summary
 from lagunhub.core.reconcile import Reconciler
 from lagunhub.core.rx import ColdItem, Received, Sent, Task
 from lagunhub.core.schedule import Schedule
@@ -43,7 +44,7 @@ from lagunhub.core.transactions import Outcome, TransactionManager
 from lagunhub.protocol.bus.base import Bus, TransmitQueueFull
 from lagunhub.protocol.endpoints import device as dev
 from lagunhub.protocol.frame import Frame, decode_header
-from lagunhub.protocol.registry import TRANSACTIONAL, MessageKind
+from lagunhub.protocol.registry import TRANSACTIONAL, MessageKind, ResultCode
 
 Publish = Callable[[Snapshot], None]
 
@@ -107,11 +108,13 @@ class CoreThread(threading.Thread):
             on_ready=self._on_enumerated,
             on_conflict=self._on_uid_conflict,
             on_failed=self._on_enumeration_failed,
+            on_start=self._on_enumeration_started,
         )
         self.commissioning = Commissioning(
             installation, self._send, self.schedule, clock, on_assigned=self._on_assigned
         )
         self.reconcile = Reconciler(installation, self._transact)
+        self.readout = Readout(installation, self._transact, on_done=self._on_readout)
         self.strangers = Strangers(
             installation,
             self._read,
@@ -550,10 +553,36 @@ class CoreThread(threading.Thread):
                     if changed:
                         self._announce_state(address, endpoint, element, raw)
                     self.touch()
+            elif outcome.result == ResultCode.UNSUPPORTED_ELEMENT and kind in (
+                MessageKind.READ,
+                MessageKind.WRITE,
+            ):
+                self._learn_absent(address, endpoint, element)
             if on_done is not None:
                 on_done(outcome)
 
         return done
+
+    def _learn_absent(self, address: int, endpoint: int, element: int) -> None:
+        """An optional attribute the node turned down is remembered **here**, for every
+        caller at once.
+
+        It used to be reconciling's own doing, so a read from the view refused the same
+        attribute every time and the API kept offering it. One place, the same as for
+        values, makes a read, reconciling and reading everything teach the hub alike
+        (zadania/zrobione/FEAT-06.md, R9).
+
+        Only an **optional** one: a device may leave out nothing else. A mandatory
+        attribute refused is the node failing its type — calling it "set by the device
+        itself" would hide that, so the caller reports it instead (R8).
+        """
+        uid = self.installation.by_address.get(address)
+        node = self.installation.nodes.get(uid) if uid is not None else None
+        model = node.endpoints.get(endpoint) if node is not None else None
+        definition = model.definition if model is not None else None
+        meta = definition.attributes.get(element) if definition is not None else None
+        if model is not None and meta is not None and meta.optional:
+            model.absent.add(element)
 
     def _on_assigned(self, record: JoinRecord) -> None:
         """After an address is assigned the node will emit `Booted` — and then we identify
@@ -589,6 +618,28 @@ class CoreThread(threading.Thread):
         # The hub writes to the node what it holds itself — that way round, never the
         # other. A blocked one is skipped by the reconciler itself.
         self.reconcile.start(node)
+
+    def _on_enumeration_started(self, record: JoinRecord) -> None:
+        """Enumeration builds a new model, so a readout of the old one stops
+        (zadania/zrobione/FEAT-06.md, R5) — whoever started it, the operator or `Booted` with new
+        firmware."""
+        if record.uid is not None:
+            self.readout.cancel(record.uid)
+
+    def _on_readout(self, node: NodeModel, summary: Summary) -> None:
+        """The end of reading everything, as a `NODE` event — the way a failed
+        enumeration is told — rather than a new kind clients would have to learn
+        (zadania/zrobione/FEAT-06.md, R10)."""
+        self.events.publish(
+            Event(
+                kind=EventKind.NODE,
+                at=self.clock(),
+                uid=node.uid,
+                name="READOUT_DONE",
+                text=summary.text(),
+            )
+        )
+        self.touch()
 
     def _on_enumeration_failed(self, record: JoinRecord, reason: str) -> None:
         """Said out loud, because one case of it is a person waiting: an enumeration they
@@ -727,6 +778,7 @@ class CoreThread(threading.Thread):
                     record.state = NodeState.UNKNOWN
         for uid in now - before:
             self.reconcile.cancel(uid)
+            self.readout.cancel(uid)
             node = inst.nodes.get(uid)
             if node is not None:
                 node.state = NodeState.BLOCKED
@@ -741,6 +793,7 @@ class CoreThread(threading.Thread):
         and — once it acknowledged its reset — forget having heard its address too, so
         the address can go to the next node, the same one admitted again included."""
         self.reconcile.cancel(uid)
+        self.readout.cancel(uid)
         node = self.installation.forget(uid)
         if node is not None and node.address and acknowledged:
             self.strangers.forget(node.address)

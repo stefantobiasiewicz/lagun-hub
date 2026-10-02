@@ -245,7 +245,8 @@ def _node_detail(state: State) -> Pane:
     if state.endpoint is not None:
         return _attributes(state, node)
     return Pane(
-        title=f"{node.alias or node.uid} · {node.name or MISSING} · {node.room or MISSING}",
+        title=f"{node.alias or node.uid} · {node.name or MISSING} · {node.room or MISSING}"
+        + _reading(node),
         columns=("EP", "TYPE", "CHANNEL", "NAME", "WHAT IS IN IT"),
         rows=tuple(
             Row(
@@ -273,7 +274,7 @@ def _attributes(state: State, node: NodeView) -> Pane:
     interesting = worth_showing(selected)
     return Pane(
         title=f"{node.alias or node.uid} · ep{selected.number} {selected.type_name} · "
-        f"channel {selected.channel} · {features_text}",
+        f"channel {selected.channel} · {features_text}" + _reading(node),
         columns=("ATTRIBUTE", "ON THE NODE", "IN THE FILE", "", "ACCESS", "KIND"),
         rows=tuple(
             Row(
@@ -292,6 +293,12 @@ def _attributes(state: State, node: NodeView) -> Pane:
         items=tuple(interesting),
         empty="the hub does not know a single value yet",
     )
+
+
+def _reading(node: NodeView) -> str:
+    """`G` runs in the background; the view polls rather than listens, so the title is
+    where its progress shows (zadania/zrobione/FEAT-06.md, R10)."""
+    return f" · reading, {node.reading} left" if node.reading is not None else ""
 
 
 def _binding_detail(state: State) -> Pane:
@@ -463,6 +470,7 @@ def _node_actions(state: State) -> tuple[tuple[str, str], ...]:
         selected = state.selected()
         blocked = isinstance(selected, NodeSummary) and selected.blocked
         out += [("E", "enumerate"), ("B", "unblock" if blocked else "block"), ("X", "remove")]
+        out.append(("G", "read everything"))
     return tuple(out)
 
 
@@ -481,6 +489,7 @@ def _attribute_actions(state: State) -> tuple[tuple[str, str], ...]:
         out.append(("w", "set on the node"))
     if "R" in selected.access:
         out.append(("g", "read"))
+    out.append(("G", "read the endpoint"))
     out.append(("c", "send a command"))
     return tuple(out)
 

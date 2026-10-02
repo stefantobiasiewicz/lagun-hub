@@ -92,12 +92,14 @@ class Enumerator:
         on_ready: Callable[[NodeModel], None] | None = None,
         on_conflict: Callable[[int, Uid, int], None] | None = None,
         on_failed: Callable[[JoinRecord, str], None] | None = None,
+        on_start: Callable[[JoinRecord], None] | None = None,
     ) -> None:
         self.installation = installation
         self._request = request
         self._on_ready = on_ready
         self._on_conflict = on_conflict
         self._on_failed = on_failed
+        self._on_start = on_start
         self._jobs: dict[int, Job] = {}
 
         self.started = 0
@@ -119,6 +121,8 @@ class Enumerator:
         job.pending = [(0, element) for element in DEVICE_READS]
         self._jobs[record.short_id] = job
         self.started += 1
+        if self._on_start is not None:
+            self._on_start(record)
         self._step(job)
         return True
 
