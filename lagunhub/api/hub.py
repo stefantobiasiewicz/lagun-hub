@@ -885,7 +885,8 @@ class HubApi:
             ready=sum(1 for node in inst.nodes.values() if node.address),
             configured=len(inst.wanted),
             issues=len(inst.issues),
-            buses=tuple(BusView(index=i, name=bus.name) for i, bus in enumerate(core.buses)),
+            buses=tuple(self._bus(i, bus.name) for i, bus in enumerate(core.buses)),
+            uptime=core.clock() - core.started,
             latency=engine.latency.percentiles() if engine else {},
             bindings={
                 "matched": engine.matched if engine else 0,
@@ -917,6 +918,21 @@ class HubApi:
                 "failed": rec.failed,
                 "running": len(rec),
             },
+        )
+
+    def _bus(self, index: int, name: str) -> BusView:
+        reading = self.core.meter.reading(index)
+        bitrate = _bitrate(self.core.config, name)
+        return BusView(
+            index=index,
+            name=name,
+            rx=reading.rx,
+            tx=reading.tx,
+            dropped=reading.dropped,
+            rx_rate=reading.rx_rate,
+            tx_rate=reading.tx_rate,
+            bitrate=bitrate,
+            load=reading.bits_rate / bitrate if bitrate else None,
         )
 
     def _config(self, inst: Installation) -> ConfigView:
@@ -1223,6 +1239,21 @@ def _outcome(outcome: Outcome) -> ActionView:
         elapsed=outcome.elapsed,
         data=outcome.data.hex(),
     )
+
+
+def _bitrate(config: Config | None, name: str) -> int | None:
+    """The bitrate of an open bus, from the file.
+
+    By the **channel**, because that is what an open `SocketCanBus` is named after; the
+    name from the file is only a label. Looked up on every reading rather than once at
+    start, because the file may be reloaded with a new bitrate.
+    """
+    if config is None:
+        return None
+    for bus in config.buses:
+        if bus.channel == name:
+            return bus.bitrate
+    return None
 
 
 def _wanted_name(description: EndpointWanted | None) -> str:

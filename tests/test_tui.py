@@ -24,7 +24,9 @@ from lagunhub.adapters.tui.state import Feed, Focus, Section, State
 from lagunhub.api import (
     AttributeView,
     BindingView,
+    BusView,
     CommissioningView,
+    HealthView,
     JoinView,
     NodeSummary,
     TargetView,
@@ -220,6 +222,48 @@ class TestDetails:
         pane = panes.details(state)
         assert any("never the other way round" in line for line in pane.note)
         assert ("R", "reconcile now") in panes.context_keys(state)
+
+
+class TestHealthDetail:
+    """Traffic per bus, one line each (zadania/zrobione/FEAT-05.md)."""
+
+    def health(self, state: State, *buses: BusView) -> list[str]:
+        view = HealthView(nodes=1, ready=1, configured=1, issues=0, buses=buses)
+        state.snapshot = replace(state.snapshot, health=view)
+        state.section = Section.HEALTH
+        return list(panes.details(state).note)
+
+    def test_a_line_per_bus_with_rates_load_and_counters(self, state: State) -> None:
+        lines = self.health(
+            state,
+            BusView(
+                0,
+                "can0",
+                rx=10234,
+                tx=2210,
+                dropped=1,
+                rx_rate=12.3,
+                tx_rate=3.0,
+                bitrate=125_000,
+                load=0.0123,
+            ),
+            BusView(1, "can1"),
+        )
+        can0 = next(line for line in lines if line.startswith("can0"))
+        assert "rx 12.3/s" in can0 and "tx 3.0/s" in can0
+        assert "≈1.2 %" in can0, "an estimate, and it says so"
+        assert "rx 10234 · tx 2210 · dropped 1" in can0
+        assert any(line.startswith("can1") for line in lines)
+
+    def test_without_a_bitrate_there_is_no_percentage(self, state: State) -> None:
+        lines = self.health(state, BusView(0, "udp", rx_rate=4.0))
+        udp = next(line for line in lines if line.startswith("udp"))
+        assert "%" not in udp
+        assert panes.MISSING in udp
+
+    def test_no_bus_says_so(self, state: State) -> None:
+        lines = self.health(state)
+        assert f"buses: {panes.MISSING}" in lines
 
 
 class TestContextKeys:

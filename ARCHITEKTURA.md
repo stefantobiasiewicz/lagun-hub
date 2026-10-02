@@ -895,7 +895,7 @@ GET  /config                                 cała konfiguracja + ETag
 PUT  /config/{ścieżka}                       zapis konfiguracji — If-Match, check-and-set
 GET  /bindings                               powiązania z pliku, z rozwiązanymi Uid
 GET  /issues                                 rozjazdy konfiguracji, konflikty adresów
-GET  /health                                 histogram opóźnień, liczniki, stan magistral
+GET  /health                                 histogram opóźnień, liczniki, ruch per magistrala (§11.1)
 POST /commissioning/accept                   tryb przyjmowania, wygasa po 15 min
 POST /commissioning/{ShortId}/admit         przyjmij węzeł PENDING spod jego adresu (§8.3)
 POST /commissioning/{ShortId}/factory-reset reset fabryczny węzła PENDING (§8.3)
@@ -1021,6 +1021,30 @@ węzłom ([`00-wprowadzenie.md`](../lagunbus-spec/00-wprowadzenie.md) § Trzy gw
 Histogram opóźnień jest **wbudowany na stałe**, nie włączany flagą, i wystawiany przez MQTT
 razem z resztą diagnostyki. Kosztuje jedno odejmowanie na ramkę.
 
+### 11.1 Traffic per bus
+
+`GET /health` carries, for every bus, frames received, sent and dropped at sending, the
+rate across the last 3 s and an estimated load ([`zadania/zrobione/FEAT-05.md`](../zadania/zrobione/FEAT-05.md);
+the code in [`core/busload.py`](lagunhub/core/busload.py)).
+
+- **The counters grow from the start and are never reset** — they, not the rate, are
+  what the hub promises. Two readings and `uptime` give any window; hourly histograms
+  and history belong to whoever collects them ([`zadania/FEAT-08.md`](../zadania/FEAT-08.md)),
+  not to the hub.
+- **Counted where the frame passes, one writer per counter**: received in the RX thread
+  before the slow queue (which may overflow), sent by the fast path in the binding engine,
+  sent by CORE in `_send`. Summed on reading, so no locks on the fast path. Sent frames are
+  counted apart from received ones because SocketCAN does not hand a socket its own
+  frames (§4.2).
+- **The rate** is CORE's: it samples the counters once a second on its own deadline (§7.2)
+  and divides the difference across the window.
+- **The load is an estimate from above**: the bits of each frame with worst-case bit
+  stuffing (160 for eight bytes), divided by the bitrate from `hub.yaml`, found by the
+  channel. A bus the file does not name (`--udp`, `--bus` past the file) has no
+  percentage. The view shows it with `≈`.
+- The slow queue's `overflowed` stays a single number — the queue is one for all buses.
+  Error frames and `bus-off` need SocketCAN on hardware (§14.1).
+
 ---
 
 ## 12. Układ projektu
@@ -1063,6 +1087,7 @@ hub/                         ← repozytorium
 │   │   ├── readout.py       reading every attribute on request (§8.5)
 │   │   ├── events.py        strumień zdarzeń dla adapterów
 │   │   ├── metrics.py       histogram opóźnień
+│   │   ├── busload.py       traffic per bus: counters, rate, load (§11.1)
 │   │   ├── config/          decyzje człowieka: wczytanie, walidacja, ZAPIS
 │   │   └── store/           model w SQLite, zapis z opóźnieniem
 │   │

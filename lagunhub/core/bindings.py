@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Final
 
+from lagunhub.core.busload import BusCounts
 from lagunhub.core.metrics import Latency
 from lagunhub.core.model import Snapshot
 from lagunhub.core.transactions import TidAllocator
@@ -59,6 +60,9 @@ class BindingEngine:
         self.unmatched = 0
         self.sent = 0
         self.dropped = 0
+        self.counts = BusCounts(len(self.buses))
+        """Per bus, written only here on the RX thread; CORE reads them
+        (`core/busload.py`). `sent` and `dropped` above are their totals."""
 
     def handle(self, frame: Frame) -> int:
         """Returns the number of commands sent. Zero is not an error.
@@ -100,11 +104,13 @@ class BindingEngine:
             try:
                 self.buses[target.bus].send(sent_one)
                 sent_now += 1
+                self.counts.count(target.bus, sent_one)
                 if self.on_sent is not None:
                     self.on_sent(target.bus, sent_one)
             except TransmitQueueFull:
                 # A late command is worse than a missing one — we do not retry.
                 self.dropped += 1
+                self.counts.drop(target.bus)
 
         self.matched += 1
         self.sent += sent_now

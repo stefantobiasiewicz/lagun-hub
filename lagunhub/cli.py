@@ -126,6 +126,7 @@ def _serve(
     core = CoreThread(
         installation, cold, publish, buses=buses, observer=tap, config_store=config_store
     )
+    core.meter.watch(received=[rx.counts], sent=[engine.counts])
     if where is not None:
         signal.signal(signal.SIGHUP, lambda *_: _reload(core, where))
 
@@ -184,6 +185,12 @@ def _serve(
             f"retried {tx.retried}  unanswered {tx.lost}  "
             f"unmatched responses {core.unmatched_responses}"
         )
+        for index, bus in enumerate(buses):
+            reading = core.meter.reading(index)
+            print(
+                f"bus {bus.name}: received {reading.rx}  sent {reading.tx}  "
+                f"dropped {reading.dropped}"
+            )
         rec = core.reconcile
         print(
             f"reconcile: checked {rec.checked}  drifted {rec.mismatched}  "

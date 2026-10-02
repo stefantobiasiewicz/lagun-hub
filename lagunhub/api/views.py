@@ -163,8 +163,30 @@ class CommissioningView:
 
 @dataclass(frozen=True, slots=True)
 class BusView:
+    """One bus and its traffic (zadania/zrobione/FEAT-05.md).
+
+    `rx`, `tx` and `dropped` grow from the hub's start and are never reset — two readings
+    and `HealthView.uptime` give any window one likes, which is what a collector of
+    metrics is to build on (zadania/FEAT-08.md). The rates are across the last few
+    seconds only (`core/busload.py`, `WINDOW`).
+    """
+
     index: int
     name: str
+    rx: int = 0
+    tx: int = 0
+    dropped: int = 0
+    """Sends a full transmit queue refused — counted apart from `tx`."""
+
+    rx_rate: float = 0.0
+    tx_rate: float = 0.0
+    bitrate: int | None = None
+    """From `hub.yaml`, found by the channel. `None` for a bus the file does not name —
+    `--udp`, or `--bus` past the file."""
+
+    load: float | None = None
+    """The share of wire time taken, 0..1 — an **estimate from above** (worst-case bit
+    stuffing), so shown as `≈`. `None` without a bitrate."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +196,9 @@ class HealthView:
     configured: int
     issues: int
     buses: tuple[BusView, ...] = ()
+    uptime: float = 0.0
+    """Seconds since the hub started — what the bus counters are counted over."""
+
     latency: Mapping[str, float] = field(default_factory=dict)
     bindings: Mapping[str, int] = field(default_factory=dict)
     core: Mapping[str, int] = field(default_factory=dict)

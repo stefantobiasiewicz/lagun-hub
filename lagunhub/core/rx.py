@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from lagunhub.core.bindings import BindingEngine
+from lagunhub.core.busload import BusCounts
 from lagunhub.protocol.bus.base import Bus
 from lagunhub.protocol.frame import Frame
 
@@ -77,6 +78,9 @@ class RxThread(threading.Thread):
         self.engine = engine
         self.cold: queue.Queue[ColdItem] = cold or queue.Queue(maxsize=4096)
         self.received = 0
+        self.counts = BusCounts(len(self.buses))
+        """Received frames per bus — counted here, before the slow queue that may
+        overflow (`core/busload.py`)."""
         self.overflowed = 0
         self._stop = threading.Event()
 
@@ -95,6 +99,7 @@ class RxThread(threading.Thread):
 
     def _dispatch(self, index: int, frame: Frame) -> None:
         self.received += 1
+        self.counts.count(index, frame)
         self.engine.handle(frame)  # the fast path — first, always
         self.offer(Received(bus=index, frame=frame))
 

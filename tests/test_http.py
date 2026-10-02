@@ -16,8 +16,9 @@ from typing import Any
 
 import pytest
 
+from lagunhub.adapters.client.client import _build
 from lagunhub.adapters.http.server import HubServer, free_port
-from lagunhub.api import HubApi
+from lagunhub.api import HealthView, HubApi
 from lagunhub.core.bindings import BindingEngine
 from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
@@ -69,6 +70,7 @@ class Hub:
         self.core = CoreThread(
             self.installation, self.rx.cold, publish, buses=[port], config_store=self.store
         )
+        self.core.meter.watch(received=[self.rx.counts], sent=[self.engine.counts])
         self.core.commissioning.accept_new(300.0)
         self.relay: NodeCore = relay1(uid=RELAY_UID, address=0, name="relay")
         self.relay.start(self.net.attach("relay"))
@@ -233,6 +235,20 @@ class TestReading:
         assert hub.get("/bindings")[1] == []
         assert hub.get("/issues")[1] == []
         assert hub.get("/commissioning")[1]["accepting"] is True
+
+    def test_health_carries_traffic_per_bus(self, hub: Hub) -> None:
+        """The relay joined, was read and reconciled — traffic both ways, and the client
+        turns it back into the same view (zadania/zrobione/FEAT-05.md)."""
+        _, body = hub.get("/health")
+        (bus,) = body["buses"]
+        assert bus["name"] == "hub"
+        assert bus["rx"] > 0 and bus["tx"] > 0
+        assert bus["bitrate"] is None and bus["load"] is None, "`hub` is not a channel in the file"
+        assert body["uptime"] > 0
+
+        health = _build(HealthView, body)
+        assert health.buses[0].rx == bus["rx"]
+        assert health.buses[0].load is None
 
     def test_admit_and_reset_are_routed_and_refuse_what_is_not_pending(self, hub: Hub) -> None:
         """The joined relay is READY, not a stranger — both operations refuse it outright

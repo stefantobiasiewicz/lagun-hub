@@ -19,6 +19,7 @@ from lagunhub.adapters.tui.state import Focus, Section, State
 from lagunhub.api import (
     AttributeView,
     BindingView,
+    BusView,
     DiffRow,
     EndpointView,
     JoinView,
@@ -377,9 +378,14 @@ def _health_detail(state: State) -> Pane:
         return Pane(note=("no data",))
     lines = [
         f"nodes {health.ready}/{health.nodes} with an address, {health.configured} configured",
-        f"buses: {', '.join(b.name for b in health.buses) or MISSING}",
-        "",
     ]
+    if health.buses:
+        width = max(len(bus.name) for bus in health.buses)
+        lines += ["", "buses (the rate across the last few seconds):"]
+        lines += [_bus_line(bus, width) for bus in health.buses]
+    else:
+        lines.append(f"buses: {MISSING}")
+    lines.append("")
     if health.latency:
         lines.append(
             "fast path: p50 {p50:.0f} µs   p99 {p99:.0f} µs   max {max:.0f} µs   n {n:.0f}".format(
@@ -397,6 +403,19 @@ def _health_detail(state: State) -> Pane:
     ):
         lines.append(f"{title}: " + "   ".join(f"{k} {v}" for k, v in counters.items()))
     return Pane(title="the hub's health", note=tuple(lines))
+
+
+def _bus_line(bus: BusView, width: int) -> str:
+    """`can0  rx 12.3/s  tx 3.0/s  ≈1.2 %  (rx 10234 · tx 2210 · dropped 0)`.
+
+    The load carries `≈` because it is an estimate from above — worst-case bit stuffing
+    (`core/busload.py`). Without a bitrate there is a dash, never a guessed percentage.
+    """
+    load = f"≈{bus.load * 100:.1f} %" if bus.load is not None else MISSING
+    return (
+        f"{bus.name:<{width}}  rx {bus.rx_rate:.1f}/s  tx {bus.tx_rate:.1f}/s  {load}  "
+        f"(rx {bus.rx} · tx {bus.tx} · dropped {bus.dropped})"
+    )
 
 
 _DETAILS: Final[dict[Section, Callable[[State], Pane]]] = {

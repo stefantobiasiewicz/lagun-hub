@@ -16,6 +16,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 
+from lagunhub.core.busload import SAMPLE, BusCounts, BusMeter
 from lagunhub.core.commissioning import Commissioning
 from lagunhub.core.config.loader import ConfigError
 from lagunhub.core.config.model import Config
@@ -144,6 +145,16 @@ class CoreThread(threading.Thread):
         self.published = 0
         self.unmatched_responses = 0
         self.dropped_sends = 0
+        self.counts = BusCounts(len(self.buses))
+        """What CORE itself sent, per bus. The fast path keeps its own — one writer per
+        counter (`core/busload.py`)."""
+
+        self.meter = BusMeter(len(self.buses))
+        """Traffic per bus. Starts with CORE's counters only; whoever starts the RX thread
+        adds the RX thread's and the binding engine's with `meter.watch`."""
+        self.meter.watch(sent=[self.counts])
+        self.meter.sample(clock())
+        self.schedule.after(clock(), SAMPLE, self._sample)
         self._dirty = True
         self._reports: dict[Source, tuple[Target, ...]] = {}
         self._issues_seen = 0
@@ -156,10 +167,20 @@ class CoreThread(threading.Thread):
         self._traffic(bus, frame, outgoing=True)
         try:
             self.buses[bus].send(frame)
-        except (TransmitQueueFull, IndexError):
+        except IndexError:
+            self.dropped_sends += 1  # no such bus — nowhere to count it either
+        except TransmitQueueFull:
             # Send queue full: we hand the request to our own timer, because a retry
             # is part of the transaction anyway (ARCHITEKTURA.md §7.1).
             self.dropped_sends += 1
+            self.counts.drop(bus)
+        else:
+            self.counts.count(bus, frame)
+
+    def _sample(self) -> None:
+        """Once a second, off the fast path: the rate is computed from these."""
+        self.schedule.after(self.clock(), SAMPLE, self._sample)
+        self.meter.sample(self.clock())
 
     # --- the loop ------------------------------------------------------------
 
