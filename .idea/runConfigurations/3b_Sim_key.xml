@@ -15,7 +15,7 @@
     <option name="ADD_SOURCE_ROOTS" value="false" />
     <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
     <option name="SCRIPT_NAME" value="$PROJECT_DIR$/../lagun-sim/.venv/bin/lagun-sim" />
-    <option name="PARAMETERS" value="key --fresh --uid a201020304050607 --name test --channels 4" />
+    <option name="PARAMETERS" value="key --fresh --uid a201020304050607 --name test --channels 3" />
     <option name="SHOW_COMMAND_LINE" value="false" />
     <option name="EMULATE_TERMINAL" value="true" />
     <option name="MODULE_MODE" value="false" />

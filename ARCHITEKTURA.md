@@ -1240,7 +1240,7 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 | **`fsync` na karcie SD** | dziesiątki do setek ms; dlatego zapis jest w wątku STORE (§5.2) |
 | **zegar** | RPi bez RTC wstaje w 1970 i wraca do teraz po `ntp` |
 | **wiele magistral** | zaprojektowane i skompilowane, ale każdy test używa jednej |
-| **sterownik po Ethernecie** | `USR-CAN315` wymaga transportu TCP — `zadania/FEAT-01.md` |
+| **magistrala przez USR-CAN315** | sterownik konfiguracyjny jest (`drivers/usr_can315/`), transportu ramek `PROTOL` po TCP nie ma — `zadania/FEAT-10.md` |
 
 ### 14.2 Adapter MQTT i Home Assistant
 
