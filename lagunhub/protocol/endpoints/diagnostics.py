@@ -33,7 +33,7 @@ QUEUE_OVERFLOW: Final = 0x03
 class BusState:
     """`BusState` values (types/0x0002-diagnostics.md §2.4). Until 2026-10-03 this had a
     `WARNING` at 1 and everything after it shifted by one, like the node library — both
-    agreed with each other and not with the specification (zadania/CR-05.md). Warning is
+    agreed with each other and not with the specification (zadania/zrobione/CR-05.md). Warning is
     covered by `ErrorThreshold`, not by a state."""
 
     ACTIVE = 0
