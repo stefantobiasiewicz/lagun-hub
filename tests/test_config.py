@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lagunhub.core.config import ConfigError, load
+from lagunhub.core.config import BusKind, ConfigError, load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.model import Installation, NodeModel, NodeState, Uid
 from lagunhub.protocol.endpoints import key_input as ki
@@ -218,6 +218,57 @@ class TestStaticValidation:
         content = BASE.replace("4: { type: KeyInput, HoldTickInterval", "4: { HoldTickInterval")
         with pytest.raises(ConfigError, match="`type`"):
             load(save(tmp_path, content))
+
+
+class TestBuses:
+    """A bus entry: `kind` plus the fields of that kind (zadania/FEAT-01.md, R6)."""
+
+    @staticmethod
+    def hub(tmp_path: Path, buses: str) -> Path:
+        path = tmp_path / "hub.yaml"
+        path.write_text(f"buses:\n{buses}", encoding="utf-8")
+        return path
+
+    def test_a_kind_spelled_out(self, tmp_path: Path) -> None:
+        entry = "  - { name: ground-floor, kind: socketcan, channel: can0, bitrate: 250000 }\n"
+        (bus,) = load(self.hub(tmp_path, entry)).buses
+        assert (bus.name, bus.kind, bus.channel, bus.bitrate) == (
+            "ground-floor",
+            BusKind.SOCKETCAN,
+            "can0",
+            250_000,
+        )
+
+    def test_without_a_kind_it_is_socketcan(self, tmp_path: Path) -> None:
+        """The shape before FEAT-01 — files written then keep working."""
+        (bus,) = load(save(tmp_path)).buses
+        assert bus.kind is BusKind.SOCKETCAN
+
+    def test_a_bare_name_is_socketcan(self, tmp_path: Path) -> None:
+        (bus,) = load(self.hub(tmp_path, "  - can1\n")).buses
+        assert (bus.name, bus.kind, bus.channel) == ("can1", BusKind.SOCKETCAN, "can1")
+
+    @pytest.mark.parametrize("kind", ["ethernet", "usr-can315"])
+    def test_an_unknown_kind(self, tmp_path: Path, kind: str) -> None:
+        """A kind is a DEVICE, not a medium: another Ethernet box would come with another
+        contract. `usr-can315` becomes known together with its transport."""
+        with pytest.raises(ConfigError, match=rf"kind '{kind}'.*socketcan"):
+            load(self.hub(tmp_path, f"  - {{ name: e, kind: {kind}, channel: can0 }}\n"))
+
+    def test_socketcan_needs_a_channel(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigError, match=r"bus 'ground-floor'.*`channel`"):
+            load(self.hub(tmp_path, "  - { name: ground-floor, kind: socketcan }\n"))
+
+    @pytest.mark.parametrize("bitrate", [0, 2_000_000, "fast"])
+    def test_a_bitrate_out_of_range(self, tmp_path: Path, bitrate: object) -> None:
+        with pytest.raises(ConfigError, match="bitrate"):
+            load(self.hub(tmp_path, f"  - {{ name: b, channel: can0, bitrate: {bitrate} }}\n"))
+
+    def test_one_channel_twice(self, tmp_path: Path) -> None:
+        """Two sockets on one interface would hear every frame twice."""
+        entries = "  - { name: a, channel: can0 }\n  - { name: b, channel: can0 }\n"
+        with pytest.raises(ConfigError, match=r"can0.*twice"):
+            load(self.hub(tmp_path, entries))
 
 
 class TestThreeShapesOfTarget:

@@ -12,6 +12,7 @@ renumbering.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Final
 
 from lagunhub.core.model import Uid
@@ -24,17 +25,39 @@ DEFAULT_BITRATE: Final = 500_000
 change."""
 
 
+MAX_BITRATE: Final = 1_000_000
+"""Classic CAN tops out at 1 Mbit/s; LagunBus is CAN 2.0B, so nothing above that."""
+
+
+class BusKind(Enum):
+    """What the hub talks to on the way to a bus — named after the **device** (its
+    contract), not after the medium (zadania/FEAT-01.md, R4, R6).
+
+    `socketcan` is any CAN interface the kernel has — an MCP2518FD on SPI, a USB stick,
+    a `vcan` for trials — all spoken to with `ip link` (`lagunhub.drivers.socketcan`).
+    The USR-CAN315 will be `usr-can315`, not `ethernet`: another box on Ethernet would
+    come with another contract (other commands, another frame format), and a kind named
+    after the cable would have to hold both. It becomes known together with its
+    transport; until then it is an unknown kind rather than an entry that loads and
+    carries nothing. The kind is also the path in the API: `/buses/socketcan/{name}`.
+    """
+
+    SOCKETCAN = "socketcan"
+
+
 @dataclass(frozen=True, slots=True)
 class BusConfig:
+    """One entry in `buses:` — `kind` plus the fields of that kind.
+
+    One flat record and not a class per kind while there is one kind: `channel` is what
+    a SocketCAN bus needs. `usr-can315` will add its own fields (address, port) next
+    to it, with the loader checking which belong to which.
+    """
+
     name: str
     channel: str
     bitrate: int = DEFAULT_BITRATE
-
-    @property
-    def link_command(self) -> str:
-        """The hub does not set the bitrate, the kernel does — and this is the command that
-        does it."""
-        return f"sudo ip link set {self.channel} type can bitrate {self.bitrate}"
+    kind: BusKind = BusKind.SOCKETCAN
 
 
 @dataclass(frozen=True, slots=True)

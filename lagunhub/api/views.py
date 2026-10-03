@@ -162,6 +162,46 @@ class CommissioningView:
 
 
 @dataclass(frozen=True, slots=True)
+class ChangeView:
+    """One difference between the hardware under a bus and the file — with the command
+    that removes it, shown as is so a person can paste it into a shell (makiety, A8)."""
+
+    what: str
+    current: str
+    desired: str
+    how: str
+    manual: bool = False
+    """The hub will not do this one: `how` tells a person what to do."""
+
+
+@dataclass(frozen=True, slots=True)
+class BusSetupView:
+    """A bus from `hub.yaml` and the hardware under it (zadania/FEAT-01.md).
+
+    Separate from `BusView`: that one is the **traffic** of a bus the hub has open, this
+    one is its **configuration**, for every bus in the file — the ones left out at start
+    included, because that is exactly where a person needs to look.
+    """
+
+    name: str
+    kind: str
+    channel: str
+    bitrate: int
+    open: bool = False
+    """Whether the hub has a socket on it in this run."""
+    nodes: int = 0
+    """Nodes the hub has an address for on this bus."""
+    hardware: str = ""
+    """What sits behind it — the kernel driver for SocketCAN (`mcp251xfd`, `gs_usb`)."""
+    where: str = ""
+    state: str = "ok"
+    """`ok` — as the file says; `drift` — the hub can fix it (`apply`); `manual` — only a
+    person can; `error` — the driver could not even look (`error` says why)."""
+    changes: tuple[ChangeView, ...] = ()
+    error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class BusView:
     """One bus and its traffic (zadania/zrobione/FEAT-05.md).
 
@@ -361,7 +401,9 @@ __all__ = [
     "ArgView",
     "AttributeView",
     "BindingView",
+    "BusSetupView",
     "BusView",
+    "ChangeView",
     "CommandView",
     "CommissioningView",
     "ConfigView",

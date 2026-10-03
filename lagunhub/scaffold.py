@@ -25,12 +25,12 @@ HUB: Final = """\
 
 buses:
   - name: {name}
+    kind: socketcan
     channel: {channel}
     bitrate: {bitrate}
 
-# The speed is not set by the hub but by the kernel:
-#   sudo ip link set {channel} up type can bitrate {bitrate}
-# `lagun-hub doctor` will say when the file drifts from what is really set.
+# The hub sets the interface up to this at every start (ip link, through sudo -n).
+# What it cannot do by itself — no such interface, no sudo rule — shows up as an issue.
 
 # Groups: the key is the NUMBER, because that is what travels in a frame's ADDRESS field.
 # The name is a label — the same rule as with nodes, where the key is the Uid.
@@ -114,7 +114,6 @@ def advice(where: Path) -> str:
         f"\nTo have the hub use it without repeating --config with every command:\n"
         f"  echo 'export LAGUN_CONFIG={path}' >> ~/.bashrc && exec bash\n"
         f"\nThen:\n"
-        f"  lagun-hub doctor\n"
         f"  lagun-hub run\n"
         f"\nThe installation starts empty. Nodes will come in by themselves once you open\n"
         f"accepting — from the view (`lagun-hub tui`, key [a]) or in hub.yaml."

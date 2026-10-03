@@ -778,7 +778,7 @@ nie rozjechały.
 (`curl`, przykłady w [`README.md`](README.md)). *Huba, który nie odpowiada* — klient nie ma
 wtedy z czym rozmawiać; diagnostyka schodzi poziom niżej, do `lagun-hub monitor`, który
 słucha magistrali i huba nie potrzebuje wcale. **Rozruch na Raspberry Pi przez SSH** tego
-nie wymaga: `lagun-hub run --accept-new`, `doctor`, `monitor`, widok (`curses` jest
+nie wymaga: `lagun-hub run --accept-new`, `monitor`, widok (`curses` jest
 w bibliotece standardowej i działa w każdym terminalu SSH) i `curl`.
 
 ### 10.3.3 Widok pełnoekranowy
@@ -905,6 +905,9 @@ POST /nodes/{uid}/read-all                   read every attribute, in the backgr
 POST /nodes/{uid}/ep/{n}/read-all            the same for one endpoint (§8.5)
 POST /nodes/{uid}/block                      blocked: true in the file (§8.4)
 POST /nodes/{uid}/unblock                    the field goes; the node is read again (§8.4)
+GET  /buses                                  buses from hub.yaml + the hardware under them: state, changes (FEAT-01)
+GET  /buses/socketcan/{name}                 the same for one bus — paths per KIND, each kind its own contract
+POST /buses/socketcan/{name}/apply           carry out what the hub may do itself; 502 when the hardware refuses
 GET  /events                                 SSE — zdarzenia i zmiany stanu na żywo
 ```
 
@@ -1091,6 +1094,11 @@ hub/                         ← repozytorium
 │   │   ├── config/          decyzje człowieka: wczytanie, walidacja, ZAPIS
 │   │   └── store/           model w SQLite, zapis z opóźnieniem
 │   │
+│   ├── drivers/             sprzęt pod magistralą: ustawienie, nie ramki (FEAT-01)
+│   │   ├── base.py          AdapterDriver: plan / apply — najpierw różnica, potem zmiana
+│   │   ├── socketcan/       ip link — każdy interfejs CAN jądra
+│   │   └── usr_can315/      komendy AT (Ethernet↔CAN)
+│   │
 │   ├── api/                 nazwana lista operacji
 │   │   ├── errors.py        Problem, ApiError — kontrakt, bez core/
 │   │   ├── views.py         widoki — kontrakt, bez core/
@@ -1100,6 +1108,7 @@ hub/                         ← repozytorium
 │   │   ├── client/          klient chodzącego huba: HTTP + SSE, protokół Hub
 │   │   ├── tui/             widok pełnoekranowy nad tym klientem
 │   │   └── mqtt/            Home Assistant — §14.2
+│   ├── buses.py             start: sterownik ustawia magistralę, potem gniazdo (FEAT-01)
 │   ├── monitor.py           podgląd ruchu i modelu
 │   └── cli.py               wiersz poleceń
 │

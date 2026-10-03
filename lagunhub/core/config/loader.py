@@ -21,9 +21,11 @@ from ruamel.yaml import YAML
 from lagunhub.core.config.model import (
     DEFAULT_API_PORT,
     DEFAULT_BITRATE,
+    MAX_BITRATE,
     ApiConfig,
     BindingConfig,
     BusConfig,
+    BusKind,
     Config,
     EndpointConfig,
     GroupConfig,
@@ -103,7 +105,7 @@ def _load(where: Path) -> Config:
 
 def _document(document: Mapping[str, Any]) -> Config:
     groups = _groups(document.get("groups") or {})
-    buses = tuple(_bus(raw) for raw in (document.get("buses") or ["vcan0"]))
+    buses = _buses(document.get("buses") or ["vcan0"])
 
     nodes: list[NodeConfig] = []
     by_alias: dict[str, NodeConfig] = {}
@@ -186,14 +188,41 @@ def _groups(raw: dict[Any, Any]) -> dict[int, GroupConfig]:
     return out
 
 
+def _buses(raw: list[Any]) -> tuple[BusConfig, ...]:
+    buses = tuple(_bus(entry) for entry in raw)
+    seen: set[str] = set()
+    for bus in buses:
+        # Two sockets bound to one interface would each hear every frame — every event
+        # carried out twice, every response matched twice.
+        if bus.channel in seen:
+            raise ConfigError(f"channel {bus.channel} is used twice in `buses`")
+        seen.add(bus.channel)
+    return buses
+
+
 def _bus(raw: str | dict[str, Any]) -> BusConfig:
+    """A bus entry. A bare name and an entry without `kind` are SocketCAN — the shape
+    files had before FEAT-01, and they keep loading."""
     if isinstance(raw, str):
         return BusConfig(name=raw, channel=raw)
+    label = str(raw.get("name") or raw.get("channel") or "?")
+    kinds = ", ".join(kind.value for kind in BusKind)
+    try:
+        kind = BusKind(str(raw.get("kind", BusKind.SOCKETCAN.value)))
+    except ValueError:
+        raise ConfigError(
+            f"bus {label!r}: unknown kind {str(raw['kind'])!r} — known: {kinds}"
+        ) from None
+    if not raw.get("channel"):
+        raise ConfigError(f"bus {label!r}: a {kind.value} bus needs a `channel` (e.g. can0)")
     channel = str(raw["channel"])
+    bitrate = raw.get("bitrate", DEFAULT_BITRATE)
+    if isinstance(bitrate, bool) or not isinstance(bitrate, int):
+        raise ConfigError(f"bus {label!r}: bitrate {bitrate!r} is not a number of bit/s")
+    if not 0 < bitrate <= MAX_BITRATE:
+        raise ConfigError(f"bus {label!r}: bitrate {bitrate} is outside 1…{MAX_BITRATE} bit/s")
     return BusConfig(
-        name=str(raw.get("name", channel)),
-        channel=channel,
-        bitrate=int(raw.get("bitrate", DEFAULT_BITRATE)),
+        name=str(raw.get("name", channel)), channel=channel, bitrate=bitrate, kind=kind
     )
 
 

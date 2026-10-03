@@ -24,6 +24,8 @@ from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.model import Uid
+from lagunhub.drivers.base import Rejected, Unreachable
+from lagunhub.drivers.socketcan import SocketCanSettings
 from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.endpoints import output as out
 from lagunhub.protocol.registry import CommonAttribute
@@ -32,6 +34,7 @@ from tests.node.devices import key1, relay1
 from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
 from tests.node.node import NodeCore
+from tests.test_buses import BITRATE, LINK, MISSING, FakeDriver
 from tests.test_enumeration import Rig, joined
 
 SWITCH_UID = bytes(range(8))
@@ -549,3 +552,105 @@ def _without_pumping(future: Future[Any], timeout: float) -> Any:
     if not future.done():
         raise FutureTimeout
     return future.result(timeout=0)
+
+
+class TestBuses:
+    """The hardware under each bus from the file (zadania/FEAT-01.md, step 5).
+
+    The Rig's one open bus is named `hub`, so a file naming channel `hub` is the open
+    one, and `can1` stands for a bus the hub left out at start.
+    """
+
+    BUSES = """
+buses:
+  - { name: ground-floor, kind: socketcan, channel: hub, bitrate: 250000 }
+  - { name: first-floor, channel: can1 }
+nodes: {}
+bindings: []
+"""
+
+    @staticmethod
+    def api(hub: Hub, drivers: dict[str, FakeDriver]) -> HubApi:
+        hub.path.write_text(TestBuses.BUSES, encoding="utf-8")
+        config = load(hub.path)
+        hub.inst.core.submit(lambda: hub.inst.core.apply_config(config))
+        hub.inst.run(0.02, step=0.005)
+        return HubApi(
+            hub.inst.core,
+            timeout=2.0,
+            wait=hub._wait,
+            drivers=lambda bus: drivers[bus.channel],
+        )
+
+    def test_every_bus_from_the_file_is_listed(self, hub: Hub, relay: NodeCore) -> None:
+        api = self.api(hub, {"hub": FakeDriver(), "can1": FakeDriver()})
+        ground, first = api.buses()
+        assert (ground.name, ground.kind, ground.channel, ground.bitrate) == (
+            "ground-floor",
+            "socketcan",
+            "hub",
+            250_000,
+        )
+        assert (ground.open, ground.nodes, ground.state) == (True, 1, "ok")
+        assert (ground.hardware, ground.where) == ("mcp251xfd", "spi0.0 · can0")
+        assert (first.open, first.nodes) == (False, 0), "left out at start: not open"
+
+    def test_a_drift_is_shown_and_not_fixed(self, hub: Hub) -> None:
+        """Looking changes nothing — a fix takes the bus down, so it is asked for."""
+        driver = FakeDriver([BITRATE, LINK])
+        api = self.api(hub, {"hub": driver, "can1": FakeDriver()})
+        view = api.bus("socketcan", "ground-floor")
+        assert view.state == "drift"
+        assert [(c.what, c.how, c.manual) for c in view.changes] == [
+            ("bitrate", BITRATE.how, False),
+            ("link", LINK.how, False),
+        ]
+        assert "apply" not in driver.calls
+
+    def test_what_only_a_person_can_do(self, hub: Hub) -> None:
+        api = self.api(hub, {"hub": FakeDriver([MISSING]), "can1": FakeDriver()})
+        assert api.bus("socketcan", "ground-floor").state == "manual"
+
+    def test_a_driver_error_is_a_state_not_a_failure(self, hub: Hub) -> None:
+        """A list of buses must not fail because one adapter is unplugged."""
+        broken = FakeDriver(fails_plan=Unreachable("no /sys/class/net: this is not Linux"))
+        api = self.api(hub, {"hub": FakeDriver(), "can1": broken})
+        _, first = api.buses()
+        assert (first.state, first.error) == ("error", "no /sys/class/net: this is not Linux")
+
+    def test_apply_carries_out_the_automatic_changes(self, hub: Hub) -> None:
+        driver = FakeDriver([BITRATE, MISSING])
+        api = self.api(hub, {"hub": driver, "can1": FakeDriver()})
+        view = api.bus_apply("socketcan", "ground-floor")
+        assert driver.applied == [BITRATE], "the manual one stays for a person"
+        assert driver.desired == SocketCanSettings(bitrate=250_000)
+        assert (view.state, [c.what for c in view.changes]) == ("manual", ["interface"])
+
+    def test_apply_refused_by_sudo(self, hub: Hub) -> None:
+        refused = Rejected("ip link set hub down", "sudo: a password is required")
+        api = self.api(
+            hub, {"hub": FakeDriver([BITRATE], fails_apply=refused), "can1": FakeDriver()}
+        )
+        with pytest.raises(ApiError) as error:
+            api.bus_apply("socketcan", "ground-floor")
+        assert error.value.problem is Problem.HARDWARE
+        assert "NOPASSWD" in error.value.message
+
+    def test_an_unknown_bus(self, hub: Hub) -> None:
+        api = self.api(hub, {"hub": FakeDriver(), "can1": FakeDriver()})
+        for call in (api.bus, api.bus_apply):
+            with pytest.raises(ApiError) as error:
+                call("socketcan", "attic")
+            assert error.value.problem is Problem.NOT_FOUND
+
+    def test_a_bus_is_found_under_its_own_kind_only(self, hub: Hub) -> None:
+        """Each kind has its own contract; a SocketCAN bus is not reachable as another."""
+        api = self.api(hub, {"hub": FakeDriver(), "can1": FakeDriver()})
+        with pytest.raises(ApiError) as error:
+            api.bus("usr-can315", "ground-floor")
+        assert error.value.problem is Problem.NOT_FOUND
+
+    def test_the_view_goes_through_json(self, hub: Hub) -> None:
+        api = self.api(hub, {"hub": FakeDriver([BITRATE]), "can1": FakeDriver()})
+        for view in api.buses():
+            json.dumps(asdict(view))

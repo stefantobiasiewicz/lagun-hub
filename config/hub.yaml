@@ -1,10 +1,12 @@
 # The hub's own settings.
 #
-# The speed is set not by the hub but by the kernel. The value is here so that it can be
-# changed in one place; `lagun-hub` prints the command that applies it.
+# The hub sets each SocketCAN interface up to its entry at every start (`ip link`,
+# through `sudo -n`); what it cannot do by itself shows up as an issue. A `vcan` is only
+# checked — bring it up with `sudo ./tools/can-up.sh vcan0`.
 
 buses:
   - name: ground-floor
+    kind: socketcan
     channel: vcan0
     bitrate: 500000
 

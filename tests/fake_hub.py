@@ -18,6 +18,8 @@ from lagunhub.api import (
     ArgView,
     AttributeView,
     BindingView,
+    BusSetupView,
+    ChangeView,
     CommandView,
     CommissioningView,
     ConfigView,
@@ -232,6 +234,37 @@ class FakeHub:
 
     def commissioning(self) -> CommissioningView:
         return CommissioningView(accepting=False)
+
+    def buses(self) -> tuple[BusSetupView, ...]:
+        self._record("buses")
+        return (self.bus("socketcan", "ground-floor"),)
+
+    def bus(self, kind: str, name: str) -> BusSetupView:
+        if (kind, name) != ("socketcan", "ground-floor"):
+            raise ApiError(Problem.NOT_FOUND, f"there is no {kind} bus {name!r} in hub.yaml")
+        applied = ("bus_apply", (kind, name)) in self.calls
+        return BusSetupView(
+            name=name,
+            kind="socketcan",
+            channel="can0",
+            bitrate=500_000,
+            open=True,
+            nodes=1,
+            hardware="mcp251xfd",
+            state="ok" if applied else "drift",
+            changes=()
+            if applied
+            else (
+                ChangeView(
+                    "bitrate", "unset", "500 kbit/s", "ip link set can0 type can bitrate 500000"
+                ),
+            ),
+        )
+
+    def bus_apply(self, kind: str, name: str) -> BusSetupView:
+        self.bus(kind, name)
+        self._record("bus_apply", kind, name)
+        return self.bus(kind, name)
 
     def diff(self) -> tuple[DiffRow, ...]:
         return self.drift

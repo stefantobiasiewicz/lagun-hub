@@ -73,6 +73,7 @@ STATUS: Final[dict[Problem, HTTPStatus]] = {
     Problem.TIMEOUT: HTTPStatus.INTERNAL_SERVER_ERROR,
     Problem.CONFLICT: HTTPStatus.CONFLICT,
     Problem.REJECTED: HTTPStatus.UNPROCESSABLE_ENTITY,
+    Problem.HARDWARE: HTTPStatus.BAD_GATEWAY,
 }
 """`SILENT` is 504 and `TIMEOUT` is 500 — and that difference is deliberate: the first
 means "the node did not answer", the second "the **hub** did not answer". The second is
@@ -242,6 +243,19 @@ def routes(api: HubApi) -> list[Route]:
         ("GET", re.compile(r"^/bindings$"), lambda r: Response(body=api.bindings())),
         ("GET", re.compile(r"^/issues$"), lambda r: Response(body=api.issues())),
         ("GET", re.compile(r"^/health$"), lambda r: Response(body=api.health())),
+        ("GET", re.compile(r"^/buses$"), lambda r: Response(body=api.buses())),
+        # Per kind, because each kind is its own contract: `socketcan` has plan and
+        # apply; `usr-can315` will add discovery and joining (zadania/FEAT-01.md).
+        (
+            "GET",
+            re.compile(r"^/buses/socketcan/([^/]+)$"),
+            lambda r: Response(body=api.bus("socketcan", r.args[0])),
+        ),
+        (
+            "POST",
+            re.compile(r"^/buses/socketcan/([^/]+)/apply$"),
+            lambda r: Response(body=api.bus_apply("socketcan", r.args[0])),
+        ),
         ("GET", re.compile(r"^/commissioning$"), lambda r: Response(body=api.commissioning())),
         (
             "POST",

@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from lagunhub import scaffold
-from lagunhub.core.config import CONFIG_ENV, default_config, load
+from lagunhub.core.config import CONFIG_ENV, BusKind, default_config, load
 from lagunhub.core.config.loader import FILES
 
 
@@ -72,11 +72,16 @@ class TestContents:
             comments = [line for line in content.split("\n") if line.startswith("#")]
             assert len(comments) >= 3, name
 
-    def test_the_ip_command_in_the_comment_matches_the_bus(self, tmp_path: Path) -> None:
-        """A human will copy it out of there once — a typo costs an evening."""
+    def test_the_bus_is_written_with_its_kind(self, tmp_path: Path) -> None:
+        """The shape from zadania/FEAT-01.md (R6). There used to be an `ip link` command
+        in a comment here for a person to copy; since the hub sets the interface up by
+        itself (R3) there is nothing to copy."""
         scaffold.init(tmp_path, channel="can1", bitrate=250_000)
         content = (tmp_path / "hub.yaml").read_text(encoding="utf-8")
-        assert "ip link set can1 up type can bitrate 250000" in content
+        assert "kind: socketcan" in content
+        assert "ip link set can1" not in content
+        (bus,) = load(tmp_path).buses
+        assert bus.kind is BusKind.SOCKETCAN
 
 
 class TestDirectoryLookup:

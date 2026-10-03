@@ -22,7 +22,15 @@ from typing import Any, Final
 from lagunhub.adapters.client.client import Hub
 from lagunhub.adapters.tui import actions, overlay, screen
 from lagunhub.adapters.tui.state import Section, State
-from lagunhub.api import ApiError, AttributeView, DiffRow, EndpointView, JoinView, NodeSummary
+from lagunhub.api import (
+    ApiError,
+    AttributeView,
+    BusSetupView,
+    DiffRow,
+    EndpointView,
+    JoinView,
+    NodeSummary,
+)
 
 TICK_MS: Final = 100
 """How long to wait for a key before redrawing. Ten frames per second is enough for the
@@ -46,6 +54,7 @@ HELP: Final[tuple[str, ...]] = (
     "               u remove from the file  g read from the node",
     "               p adopt the value from the node INTO THE FILE",
     "bindings:      + add     - remove",
+    "buses:         u reconcile with the file — asks first, the bus goes down for a moment",
     "joining:       a open    y admit a PENDING node   X reset it to factory",
     "               B block a PENDING node — the hub then ignores it",
     "",
@@ -472,6 +481,52 @@ def _set_on_node(state: State) -> None:
     )
 
 
+def _u(state: State) -> None:
+    """`u` is "make it as the file says" on a bus, "remove from the file" on an attribute."""
+    if state.section is Section.BUSES:
+        _bus_apply(state)
+    else:
+        _remove(state)
+
+
+def _bus_apply(state: State) -> None:
+    """Reconcile a bus with the file — confirmed by retyping its name.
+
+    The same weight as a factory reset: `ip link set … down/up` is a moment without a bus,
+    and every node on it stops answering for that moment (makiety, screen 12).
+    """
+    bus = state.selected()
+    if not isinstance(bus, BusSetupView) or not any(not c.manual for c in bus.changes):
+        state.say("! there is nothing the hub can reconcile here")
+        return
+
+    def carry_out(_: str) -> None:
+        def task() -> str:
+            view = state.hub.bus_apply(bus.kind, bus.name)
+            state.reload()
+            left = len(view.changes)
+            return f"{bus.name}: reconciled" + (f", {left} left for a person" if left else "")
+
+        state.worker.submit(task)
+
+    commands = [f"  {c.how}" for c in bus.changes if not c.manual]
+    state.overlay = overlay.Confirm(
+        title="Reconcile the bus?",
+        lines_before=(
+            f"{bus.name} · {bus.kind} · {bus.channel}",
+            "",
+            "The hub will run:",
+            *commands,
+            "",
+            f"The bus goes down for a moment; {bus.nodes} node(s) on it stop answering",
+            "and bindings across it do not fire until it is back.",
+        ),
+        expect=bus.name,
+        prompt="type the bus name to confirm:",
+        on_accept=carry_out,
+    )
+
+
 def _remove(state: State) -> None:
     target = _attribute(state)
     if target is None or not target[2].configurable:
@@ -606,7 +661,7 @@ _LETTERS: Final[dict[int, Callable[[State], None]]] = {
     ord("R"): _reconcile,
     ord("e"): _edit,
     ord("w"): _set_on_node,
-    ord("u"): _remove,
+    ord("u"): _u,
     ord("g"): _read,
     ord("G"): _read_all,
     ord("p"): _adopt,

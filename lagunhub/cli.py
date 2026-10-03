@@ -13,23 +13,33 @@ import threading
 import time
 from pathlib import Path
 
-from lagunhub import __version__, doctor, scaffold
+from lagunhub import __version__, buses, scaffold
 from lagunhub.adapters.client import discover
 from lagunhub.adapters.client.client import TOKEN_ENV
 from lagunhub.adapters.http import HubServer
 from lagunhub.adapters.http.auth import TOKEN_FILE, TokenError
 from lagunhub.api import ApiError, HubApi
 from lagunhub.core.bindings import BindingEngine
-from lagunhub.core.config import CONFIG_ENV, ApiConfig, ConfigError, default_config, load
+from lagunhub.core.config import (
+    CONFIG_ENV,
+    ApiConfig,
+    BusConfig,
+    Config,
+    ConfigError,
+    default_config,
+    load,
+)
 from lagunhub.core.config.apply import apply
 from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.hub import CoreThread
 from lagunhub.core.model import Installation, Snapshot
 from lagunhub.core.rx import ColdItem, Received, RxThread, Sent, Task
+from lagunhub.drivers.socketcan import SocketCanDriver
 from lagunhub.monitor import format_frame, format_installation
 from lagunhub.protocol import registry
 from lagunhub.protocol.bus import SocketCanBus, UdpBus
 from lagunhub.protocol.bus.base import Bus
+from lagunhub.protocol.bus.socketcan import HAS_SOCKETCAN
 from lagunhub.protocol.bus.udp import DEFAULT_GROUP, DEFAULT_PORT, parse_address
 
 UDP_DEFAULT = f"{DEFAULT_GROUP}:{DEFAULT_PORT}"
@@ -93,6 +103,7 @@ def _serve(
     config_store: ConfigStore | None = None,
     feed: bool | None = None,
     accept_new: bool = False,
+    config: Config | None = None,
 ) -> int:
     """Start the hub and show the traffic. The threads work alongside and do not wait for
     the printing.
@@ -127,6 +138,11 @@ def _serve(
         installation, cold, publish, buses=buses, observer=tap, config_store=config_store
     )
     core.meter.watch(received=[rx.counts], sent=[engine.counts])
+    # The file the hub started with. Without it `core.config` stayed `None` until the
+    # first change to the file: the bitrate (and so the load) was missing from `health`,
+    # and `/buses` was empty. The installation itself was applied before — this is only
+    # the record of which configuration is in force.
+    core.config = config
     if where is not None:
         signal.signal(signal.SIGHUP, lambda *_: _reload(core, where))
 
@@ -222,16 +238,6 @@ def _init(directory: Path, bus: str, bitrate: int) -> int:
     return 0
 
 
-def _doctor(config: Path) -> int:
-    """The hub is built on macOS and works on an RPi — so the answer to "what is wrong"
-    has to come **from the RPi**, not from guesswork."""
-    results = doctor.check(config)
-    print(doctor.report(results))
-    sentence, code = doctor.summary(results)
-    print(f"\n{sentence}")
-    return code
-
-
 def _tui(config: Path, url: str | None, token: str | None) -> int:
     """The full-screen view does not start a hub — it **attaches to a running one**.
 
@@ -300,6 +306,36 @@ def _open_buses(channels: list[str], udp: str | None) -> list[Bus]:
     return [SocketCanBus(channel) for channel in channels]
 
 
+def _bus_configs(config: Config, channels: list[str] | None) -> list[BusConfig]:
+    """The buses from the file — or the channels from `--bus`, each with its entry from
+    the file when there is one, so its bitrate is still the file's."""
+    if not channels:
+        return list(config.buses)
+    by_channel = {bus.channel: bus for bus in config.buses}
+    return [
+        by_channel.get(channel, BusConfig(name=channel, channel=channel)) for channel in channels
+    ]
+
+
+def _bring_up_buses(configs: list[BusConfig]) -> tuple[list[Bus], list[str]]:
+    """Set every SocketCAN interface up as the file says, then open the sockets
+    (zadania/FEAT-01.md, R3). What the hub cannot do itself comes back as issues and the
+    hub starts anyway — `lagunhub/buses.py` says why. Without SocketCAN on this machine
+    there is nothing to set up, and opening raises `RuntimeError` with its own sentence.
+    """
+    issues: list[str] = []
+    if HAS_SOCKETCAN:
+        for config in configs:
+            outcome = buses.bring_up(config, SocketCanDriver(config.channel))
+            print(outcome.line(), flush=True)
+            if outcome.issue:
+                issues.append(outcome.issue)
+    opened, left_out = buses.open_buses(configs, lambda bus: SocketCanBus(bus.channel))
+    for issue in left_out:
+        print(f"!! {issue}", flush=True)
+    return opened, issues + left_out
+
+
 def _ephemeral_config(source: Path | None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
     """A configuration in a temporary directory, removed when the hub stops.
 
@@ -339,9 +375,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     init_cmd.add_argument("--bus", default="can0", help="the interface name; vcan0 for trials")
     init_cmd.add_argument("--bitrate", type=int, default=500_000)
-
-    check_cmd = sub.add_parser("doctor", help="what is ready on this machine and what is not")
-    check_cmd.add_argument("--config", type=Path, default=default_config())
 
     monitor = sub.add_parser("monitor", help="a traffic preview; it carries out no bindings")
     monitor_source = monitor.add_mutually_exclusive_group()
@@ -410,9 +443,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init":
         return _init(args.directory, args.bus, args.bitrate)
 
-    if args.command == "doctor":
-        return _doctor(args.config)
-
     if args.command == "tui":
         return _tui(args.config, args.url, args.token)
 
@@ -451,21 +481,21 @@ def _run(args: argparse.Namespace, where: Path) -> int:
         print(f"the configuration is not valid: {exc}", file=sys.stderr)
         return 2
 
+    issues: list[str] = []
     try:
-        buses = _open_buses(args.bus or list(config.channels), args.udp)
+        if args.udp:
+            opened = _open_buses([], args.udp)
+            print(
+                f"bus {opened[0].name} (UDP {args.udp}) · TEST ONLY — simulated nodes, "
+                "the buses from the file are not used",
+                flush=True,
+            )
+        else:
+            opened, issues = _bring_up_buses(_bus_configs(config, args.bus))
     except (ValueError, OSError, RuntimeError) as exc:
         hint = "" if args.udp else " — without CAN on this machine, try --udp"
         print(f"cannot open the bus: {exc}{hint}", file=sys.stderr)
         return 2
-    if args.udp:
-        print(
-            f"bus {buses[0].name} (UDP {args.udp}) · TEST ONLY — simulated nodes, "
-            "the buses from the file are not used",
-            flush=True,
-        )
-    else:
-        for bus in config.buses:
-            print(f"bus {bus.name} ({bus.channel}) · {bus.bitrate // 1000} kbit/s", flush=True)
     print(f"bindings: {len(config.bindings)}  nodes in the configuration: {len(config.nodes)}")
     for node in config.nodes:
         print(f"  {node.alias:<18} {node.name or node.uid.hex()}", flush=True)
@@ -473,15 +503,17 @@ def _run(args: argparse.Namespace, where: Path) -> int:
 
     installation = Installation()
     apply(installation, config)
+    installation.issues.extend(issues)
     store = ConfigStore(where)
     return _serve(
-        buses,
+        opened,
         installation,
         where,
         config.api,
         store,
         args.feed,
         accept_new=config.accept_new or args.accept_new,
+        config=config,
     )
 
 

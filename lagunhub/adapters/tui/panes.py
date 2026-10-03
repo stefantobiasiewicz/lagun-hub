@@ -19,6 +19,7 @@ from lagunhub.adapters.tui.state import Focus, Section, State
 from lagunhub.api import (
     AttributeView,
     BindingView,
+    BusSetupView,
     BusView,
     DiffRow,
     EndpointView,
@@ -213,11 +214,52 @@ def _health(state: State) -> Pane:
     return Pane(empty="", rows=(), columns=())
 
 
+def _buses(state: State) -> Pane:
+    """Every bus in `hub.yaml` and the hardware under it (zadania/FEAT-01.md).
+
+    `OPEN` says whether the hub has a socket on it in this run — a bus left out at start
+    is here too, because that is where a person has to look.
+    """
+    return Pane(
+        columns=("NAME", "KIND", "CHANNEL", "HARDWARE", "BITRATE", "OPEN", "NODES", "CONFIG"),
+        aligns=("<", "<", "<", "<", ">", "<", ">", "<"),
+        rows=tuple(
+            Row(
+                (
+                    b.name,
+                    b.kind,
+                    b.channel,
+                    b.hardware or MISSING,
+                    f"{b.bitrate // 1000} kbit/s",
+                    "yes" if b.open else "NO",
+                    str(b.nodes),
+                    _bus_state(b),
+                ),
+                GOOD if b.state == "ok" and b.open else BAD,
+            )
+            for b in state.snapshot.buses
+        ),
+        items=tuple(state.snapshot.buses),
+        empty="no buses in hub.yaml",
+    )
+
+
+def _bus_state(bus: BusSetupView) -> str:
+    if bus.state == "ok":
+        return "✓"
+    if bus.state == "error":
+        return "ERROR"
+    automatic = sum(1 for change in bus.changes if not change.manual)
+    by_hand = len(bus.changes) - automatic
+    return f"DRIFT {automatic}" if automatic else f"BY HAND {by_hand}"
+
+
 _LISTS: Final[dict[Section, Callable[[State], Pane]]] = {
     Section.NODES: _nodes,
     Section.BINDINGS: _bindings,
     Section.DIFF: _diff,
     Section.ISSUES: _issues,
+    Section.BUSES: _buses,
     Section.JOINING: _joining,
     Section.HEALTH: _health,
 }
@@ -372,6 +414,41 @@ def _joining_detail(state: State) -> Pane:
     )
 
 
+def _bus_detail(state: State) -> Pane:
+    """What differs, and the commands that will run — shown raw, so they can be pasted
+    into a shell when something does not take (makiety, A8).
+
+    All of it is prose, the table of changes included: the details pane draws either
+    rows or prose, and here the commands under the table are the point. Nothing in it
+    is selectable, so nothing is lost by not being rows."""
+    bus = state.selected()
+    if not isinstance(bus, BusSetupView):
+        return Pane()
+    where = " · ".join(part for part in (bus.hardware, bus.where) if part)
+    title = f"{bus.name} · {bus.kind} · {bus.channel}" + (f" · {where}" if where else "")
+    if bus.state == "error":
+        return Pane(title=title, note=(bus.error, "", "The hub could not even look at it."))
+    prose: list[str] = []
+    if not bus.open:
+        prose += ["The hub did not open this bus at start — see Issues; it takes a restart.", ""]
+    if bus.changes:
+        prose.append(f"{'PARAMETER':<24}{'NOW':<16}{'IN THE FILE':<16}")
+        prose += [
+            f"{c.what:<24}{c.current:<16}{c.desired:<16}{'BY HAND' if c.manual else ''}".rstrip()
+            for c in bus.changes
+        ]
+        prose.append("")
+    automatic = [change.how for change in bus.changes if not change.manual]
+    if automatic:
+        prose += ["[u] will run:", *(f"  {how}" for how in automatic)]
+    for change in bus.changes:
+        if change.manual:
+            prose += ["", f"by hand — {change.what}:", f"  {change.how}"]
+    if not bus.changes:
+        prose.append("As the file says.")
+    return Pane(title=title, note=tuple(prose))
+
+
 def _health_detail(state: State) -> Pane:
     health = state.snapshot.health
     if health is None:
@@ -423,6 +500,7 @@ _DETAILS: Final[dict[Section, Callable[[State], Pane]]] = {
     Section.BINDINGS: _binding_detail,
     Section.DIFF: _diff_detail,
     Section.ISSUES: _issue_detail,
+    Section.BUSES: _bus_detail,
     Section.JOINING: _joining_detail,
     Section.HEALTH: _health_detail,
 }
@@ -456,6 +534,11 @@ def context_keys(state: State) -> tuple[tuple[str, str], ...]:
         return _node_actions(state)
     if state.section is Section.DIFF and isinstance(state.selected(), DiffRow):
         return (("R", "reconcile now"), ("p", "adopt the value from the node into the file"))
+    if state.section is Section.BUSES:
+        selected = state.selected()
+        if isinstance(selected, BusSetupView) and any(not c.manual for c in selected.changes):
+            return (("u", "reconcile — the bus goes down for a moment"),)
+        return ()
     if state.section is Section.BINDINGS:
         out: list[tuple[str, str]] = [("+", "add a binding")]
         if state.selected() is not None:

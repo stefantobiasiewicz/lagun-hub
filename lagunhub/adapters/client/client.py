@@ -38,6 +38,7 @@ from lagunhub.api import (
     ActionView,
     ApiError,
     BindingView,
+    BusSetupView,
     CommissioningView,
     ConfigView,
     DiffRow,
@@ -72,6 +73,9 @@ class Hub(Protocol):
     def issues(self) -> tuple[str, ...]: ...
     def health(self) -> HealthView: ...
     def commissioning(self) -> CommissioningView: ...
+    def buses(self) -> tuple[BusSetupView, ...]: ...
+    def bus(self, kind: str, name: str) -> BusSetupView: ...
+    def bus_apply(self, kind: str, name: str) -> BusSetupView: ...
     def diff(self) -> tuple[DiffRow, ...]: ...
     def command(
         self, ref: str, endpoint: int, name: str, args: Mapping[str, Any] | None = None
@@ -146,6 +150,16 @@ class HubClient:
 
     def diff(self) -> tuple[DiffRow, ...]:
         return self._many(DiffRow, self._call("GET", "/diff"))
+
+    def buses(self) -> tuple[BusSetupView, ...]:
+        return self._many(BusSetupView, self._call("GET", "/buses"))
+
+    def bus(self, kind: str, name: str) -> BusSetupView:
+        return _build(BusSetupView, self._call("GET", f"/buses/{_quote(kind)}/{_quote(name)}"))
+
+    def bus_apply(self, kind: str, name: str) -> BusSetupView:
+        path = f"/buses/{_quote(kind)}/{_quote(name)}/apply"
+        return _build(BusSetupView, self._call("POST", path))
 
     # --- control -----------------------------------------------------------------
 

@@ -18,7 +18,7 @@ import pytest
 
 from lagunhub.adapters.client.client import _build
 from lagunhub.adapters.http.server import HubServer, free_port
-from lagunhub.api import HealthView, HubApi
+from lagunhub.api import BusSetupView, HealthView, HubApi
 from lagunhub.core.bindings import BindingEngine
 from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
@@ -26,11 +26,13 @@ from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.hub import CoreThread
 from lagunhub.core.model import Installation, Snapshot
 from lagunhub.core.rx import RxThread, Sent
+from lagunhub.drivers.base import Rejected
 from lagunhub.protocol.bus import VirtualNetwork
 from lagunhub.protocol.endpoints import output as out
 from tests.node.devices import relay1
 from tests.node.endpoints.output import Output
 from tests.node.node import NodeCore
+from tests.test_buses import BITRATE, FakeDriver
 
 RELAY_UID = bytes(range(8, 16))
 TOKEN = "test-token"
@@ -71,6 +73,8 @@ class Hub:
             self.installation, self.rx.cold, publish, buses=[port], config_store=self.store
         )
         self.core.meter.watch(received=[self.rx.counts], sent=[self.engine.counts])
+        self.core.config = load(path)  # as `lagun-hub run` does
+        self.driver = FakeDriver([BITRATE])
         self.core.commissioning.accept_new(300.0)
         self.relay: NodeCore = relay1(uid=RELAY_UID, address=0, name="relay")
         self.relay.start(self.net.attach("relay"))
@@ -83,7 +87,7 @@ class Hub:
         self._stop = threading.Event()
         self._pump = threading.Thread(target=self._loop, daemon=True)
         self.server = HubServer(
-            HubApi(self.core, engine=self.engine),
+            HubApi(self.core, engine=self.engine, drivers=lambda bus: self.driver),
             host="127.0.0.1",
             port=free_port(),
             token=TOKEN,
@@ -391,6 +395,43 @@ class TestControl:
         status, error = hub.call("POST", "/nodes/kitchen-relay/ep/4/commands/Toggle")
         assert status == 409
         assert error["result"] == "BUSY"
+
+
+class TestBuses:
+    """`/buses` — the hardware under each bus from the file (zadania/FEAT-01.md)."""
+
+    def test_the_list(self, hub: Hub) -> None:
+        status, content = hub.get("/buses")
+        assert status == 200
+        (bus,) = (_build(BusSetupView, item) for item in content)
+        assert (bus.name, bus.kind, bus.channel, bus.state) == (
+            "vcan0",
+            "socketcan",
+            "vcan0",
+            "drift",
+        )
+        assert bus.changes[0].how == BITRATE.how
+
+    def test_apply(self, hub: Hub) -> None:
+        status, content = hub.call("POST", "/buses/socketcan/vcan0/apply")
+        assert status == 200
+        assert content["state"] == "ok"
+        assert hub.driver.applied == [BITRATE]
+
+    def test_an_unknown_bus(self, hub: Hub) -> None:
+        status, content = hub.get("/buses/socketcan/attic")
+        assert (status, content["problem"]) == (404, "not_found")
+
+    def test_a_kind_without_routes(self, hub: Hub) -> None:
+        status, _ = hub.get("/buses/usr-can315/vcan0")
+        assert status == 404
+
+    def test_hardware_that_refuses_is_a_bad_gateway(self, hub: Hub) -> None:
+        """Neither the request nor the hub is at fault — the third party in between."""
+        hub.driver.fails_apply = Rejected("ip link set vcan0 down", "Operation not permitted")
+        status, content = hub.call("POST", "/buses/socketcan/vcan0/apply")
+        assert (status, content["problem"]) == (502, "hardware")
+        assert "Operation not permitted" in content["message"]
 
 
 class TestLifecycle:

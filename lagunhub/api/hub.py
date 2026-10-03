@@ -28,21 +28,25 @@ bugs disappears along the way: there is no second view that could drift from the
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import contextmanager
-from dataclasses import fields
+from dataclasses import fields, replace
 from typing import Any, Protocol
 
 from lagunhub import __version__
+from lagunhub import buses as bus_setup
 from lagunhub.api.errors import ApiError, Problem
 from lagunhub.api.views import (
     ActionView,
     ArgView,
     AttributeView,
     BindingView,
+    BusSetupView,
     BusView,
+    ChangeView,
     CommandView,
     CommissioningView,
     ConfigView,
@@ -64,7 +68,7 @@ from lagunhub.api.views import (
 )
 from lagunhub.core.bindings import BindingEngine
 from lagunhub.core.config.loader import ConfigError
-from lagunhub.core.config.model import Config
+from lagunhub.core.config.model import BusConfig, Config
 from lagunhub.core.config.store import ConfigStore, ConflictError
 from lagunhub.core.events import DEPTH, Event, Subscription
 from lagunhub.core.hub import CoreThread
@@ -80,6 +84,8 @@ from lagunhub.core.model import (
 )
 from lagunhub.core.traffic import Traffic
 from lagunhub.core.transactions import Outcome
+from lagunhub.drivers.base import AdapterDriver, Change, DriverError, Rejected
+from lagunhub.drivers.socketcan import SocketCanDriver
 from lagunhub.protocol.endpoints import device as dev
 from lagunhub.protocol.endpoints import sense as sns
 from lagunhub.protocol.endpoints.definition import (
@@ -162,6 +168,14 @@ def block(future: Future[Any], timeout: float) -> Any:
     return future.result(timeout=timeout)
 
 
+DriverFactory = Callable[[BusConfig], AdapterDriver]
+"""The driver for the hardware under a bus. Injected so tests need no Linux."""
+
+
+def socketcan_driver(bus: BusConfig) -> AdapterDriver:
+    return SocketCanDriver(bus.channel)
+
+
 # --- API -------------------------------------------------------------------------
 
 
@@ -175,8 +189,12 @@ class HubApi:
         engine: BindingEngine | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         wait: Waiter = block,
+        drivers: DriverFactory = socketcan_driver,
     ) -> None:
         self.core = core
+        self.drivers = drivers
+        self._applying = threading.Lock()
+        """One `apply` at a time: two would interleave their `ip link set … down/up`."""
         self.engine = engine
         """`BindingEngine` — purely so that `health()` has a histogram."""
 
@@ -218,6 +236,52 @@ class HubApi:
 
     def commissioning(self) -> CommissioningView:
         return self._ask(self._commissioning)
+
+    # --- buses (zadania/FEAT-01.md) ------------------------------------------------
+    #
+    # The driver runs on the CALLER's thread, not on CORE: `ip` is a subprocess and may
+    # take seconds, CORE answers nodes in milliseconds. From CORE comes only what is
+    # CORE's — the file's entries and which buses are open with how many nodes on them.
+
+    def buses(self) -> tuple[BusSetupView, ...]:
+        """Every bus in `hub.yaml` with the state of its hardware. Changes nothing."""
+        entries, open_channels, counts = self._ask(self._bus_entries)
+        return tuple(self._setup(bus, open_channels, counts) for bus in entries)
+
+    def bus(self, kind: str, name: str) -> BusSetupView:
+        """One bus, under its own kind — each kind has its own contract, and its own
+        paths in the API (`/buses/socketcan/{name}`)."""
+        entries, open_channels, counts = self._ask(self._bus_entries)
+        return self._setup(self._bus_entry(entries, kind, name), open_channels, counts)
+
+    def bus_apply(self, kind: str, name: str) -> BusSetupView:
+        """Carry out what the hub may do itself; what only a person can stays listed.
+
+        This takes the interface down and up — a few hundred milliseconds without a bus
+        — which is why it is asked for and never done by looking (makiety, A3). A socket
+        the hub has on it stays bound through the bounce. A bus left out at start does
+        not join the running hub by this: it takes a restart.
+        """
+        entries, _, _ = self._ask(self._bus_entries)
+        bus = self._bus_entry(entries, kind, name)
+        with self._applying:
+            driver = self.drivers(bus)
+            try:
+                driver.open()
+                try:
+                    plan = driver.plan(bus_setup.settings(bus))
+                    automatic = [change for change in plan if not change.manual]
+                    if automatic:
+                        driver.apply(automatic)
+                finally:
+                    driver.close()
+            except Rejected as exc:
+                raise ApiError(
+                    Problem.HARDWARE, f"{bus.name}: {exc}{bus_setup.sudo_hint(exc)}"
+                ) from None
+            except (DriverError, ValueError) as exc:
+                raise ApiError(Problem.HARDWARE, f"{bus.name}: {exc}") from None
+        return self.bus(kind, name)
 
     # --- control -----------------------------------------------------------------
 
@@ -993,6 +1057,63 @@ class HubApi:
 
     # --- shared -------------------------------------------------------------------
 
+    def _bus_entries(
+        self, inst: Installation
+    ) -> tuple[tuple[BusConfig, ...], frozenset[str], dict[str, int]]:
+        """On CORE: the file's buses, the open ones by name, nodes per open bus."""
+        config = self.core.config
+        names = [bus.name for bus in self.core.buses]
+        counts: dict[str, int] = {}
+        for node in inst.nodes.values():
+            if node.address and 0 <= node.bus < len(names):
+                counts[names[node.bus]] = counts.get(names[node.bus], 0) + 1
+        return (config.buses if config else ()), frozenset(names), counts
+
+    @staticmethod
+    def _bus_entry(entries: tuple[BusConfig, ...], kind: str, name: str) -> BusConfig:
+        for bus in entries:
+            if bus.name == name and bus.kind.value == kind:
+                return bus
+        raise ApiError(Problem.NOT_FOUND, f"there is no {kind} bus {name!r} in hub.yaml")
+
+    def _setup(
+        self, bus: BusConfig, open_channels: frozenset[str], counts: dict[str, int]
+    ) -> BusSetupView:
+        """Ask the driver — off CORE. A driver that cannot even look is a state of the
+        bus, not a failure of the list: one unplugged adapter must not hide the rest."""
+        # An open `SocketCanBus` is named after its channel (`_bitrate` relies on it too).
+        base = BusSetupView(
+            name=bus.name,
+            kind=bus.kind.value,
+            channel=bus.channel,
+            bitrate=bus.bitrate,
+            open=bus.channel in open_channels,
+            nodes=counts.get(bus.channel, 0),
+        )
+        driver = self.drivers(bus)
+        try:
+            driver.open()
+            try:
+                info = driver.info()
+                plan = driver.plan(bus_setup.settings(bus))
+            finally:
+                driver.close()
+        except (DriverError, ValueError) as exc:
+            return replace(base, state="error", error=str(exc))
+        if any(not change.manual for change in plan):
+            state = "drift"
+        elif plan:
+            state = "manual"
+        else:
+            state = "ok"
+        return replace(
+            base,
+            hardware=info.firmware,
+            where=info.where,
+            state=state,
+            changes=tuple(_change(change) for change in plan),
+        )
+
     def _bus_name(self, index: int) -> str:
         buses = self.core.buses
         return buses[index].name if 0 <= index < len(buses) else str(index)
@@ -1238,6 +1359,16 @@ def _outcome(outcome: Outcome) -> ActionView:
         attempts=outcome.attempts,
         elapsed=outcome.elapsed,
         data=outcome.data.hex(),
+    )
+
+
+def _change(change: Change) -> ChangeView:
+    return ChangeView(
+        what=change.what,
+        current=change.current,
+        desired=change.desired,
+        how=change.how,
+        manual=change.manual,
     )
 
 

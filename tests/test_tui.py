@@ -24,7 +24,9 @@ from lagunhub.adapters.tui.state import Feed, Focus, Section, State
 from lagunhub.api import (
     AttributeView,
     BindingView,
+    BusSetupView,
     BusView,
+    ChangeView,
     CommissioningView,
     HealthView,
     JoinView,
@@ -910,3 +912,99 @@ class TestNodeLifecycle:
         self.nodes(state)
         keys = dict(panes.context_keys(state))
         assert keys["X"] == "remove" and keys["E"] == "enumerate" and keys["B"] == "block"
+
+
+class TestBuses:
+    """The `Buses` section — the hardware under each bus from the file
+    (zadania/FEAT-01.md, step 6; can-drivers/docs/MAKIETY-MAGISTRALE.md, screens 1, 3, 12)."""
+
+    def buses(self, state: State) -> State:
+        state.worker._on_done = lambda _: None
+        state.section = Section.BUSES
+        state.reload()
+        return state
+
+    def test_the_section_sits_between_issues_and_joining(self) -> None:
+        sections = list(Section)
+        assert sections.index(Section.BUSES) == sections.index(Section.ISSUES) + 1
+        assert sections.index(Section.JOINING) == sections.index(Section.BUSES) + 1
+
+    def test_hardware_is_asked_only_while_the_section_is_open(self, state: State) -> None:
+        """Every look runs `ip` on the hub — not every two seconds for nobody."""
+        state.section = Section.NODES
+        state.reload()
+        assert not any(call[0] == "buses" for call in _fake(state).calls)
+        self.buses(state)
+        assert state.snapshot.buses
+
+    def test_the_list(self, state: State) -> None:
+        self.buses(state)
+        pane = panes.items(state)
+        assert pane.columns[0] == "NAME"
+        (row,) = pane.rows
+        assert row.cells == (
+            "ground-floor",
+            "socketcan",
+            "can0",
+            "mcp251xfd",
+            "500 kbit/s",
+            "yes",
+            "1",
+            "DRIFT 1",
+        )
+        assert row.colour == panes.BAD
+
+    def test_the_detail_shows_what_will_run(self, state: State) -> None:
+        self.buses(state)
+        manual = ChangeView("interface", "missing", "can0", "`dmesg`", manual=True)
+        bus = replace(state.snapshot.buses[0], changes=(*state.snapshot.buses[0].changes, manual))
+        state.snapshot = replace(state.snapshot, buses=(bus,))
+        note = panes.details(state).note
+        bitrate = next(line for line in note if line.startswith("bitrate"))
+        assert bitrate.split() == ["bitrate", "unset", "500", "kbit/s"]
+        interface = next(line for line in note if line.startswith("interface"))
+        assert interface.split() == ["interface", "missing", "can0", "BY", "HAND"]
+        assert "  ip link set can0 type can bitrate 500000" in note
+        assert "  `dmesg`" in note, "the manual one says what to do"
+
+    def test_an_error_is_shown_not_hidden(self, state: State) -> None:
+        self.buses(state)
+        broken = BusSetupView(
+            name="first-floor",
+            kind="socketcan",
+            channel="can1",
+            bitrate=500_000,
+            state="error",
+            error="no /sys/class/net: this is not Linux",
+        )
+        state.snapshot = replace(state.snapshot, buses=(broken,))
+        (row,) = panes.items(state).rows
+        assert row.cells[-1] == "ERROR"
+        assert "no /sys/class/net: this is not Linux" in panes.details(state).note
+
+    def test_u_reconciles_only_after_the_name_is_retyped(self, state: State) -> None:
+        """Reconciling takes the bus down for a moment — the weight of a factory reset."""
+        self.buses(state)
+        app.key(state, ord("u"))
+        assert isinstance(state.overlay, overlay.Confirm)
+        _run(state)
+        assert ("bus_apply", ("socketcan", "ground-floor")) not in _fake(state).calls
+        for letter in "ground-floor":
+            app.key(state, ord(letter))
+        app.key(state, 10)
+        _run(state)
+        assert ("bus_apply", ("socketcan", "ground-floor")) in _fake(state).calls
+        assert state.snapshot.buses[0].state == "ok"
+
+    def test_nothing_to_reconcile_nothing_asked(self, state: State) -> None:
+        self.buses(state)
+        state.snapshot = replace(
+            state.snapshot, buses=(replace(state.snapshot.buses[0], state="ok", changes=()),)
+        )
+        app.key(state, ord("u"))
+        assert state.overlay is None
+        assert panes.context_keys(state) == ()
+
+    def test_the_key_is_listed_when_there_is_something_to_do(self, state: State) -> None:
+        self.buses(state)
+        assert ("u", "reconcile — the bus goes down for a moment") in panes.context_keys(state)

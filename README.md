@@ -304,6 +304,7 @@ i token bierze sam z `config/`, więc zwykle wystarcza `lagun-hub tui`; inaczej
 | `n` `N` | nazwa / alias węzła (idą do pliku) |
 | `e` `w` | edytuj **w pliku** / nastaw **w węźle** |
 | `u` `g` `p` | usuń z pliku / odczytaj z węzła / przyjmij z węzła do pliku |
+| `u` w `Buses` | uzgodnij magistralę z `hub.yaml` (`ip link`) — pyta o nazwę, bo magistrala na chwilę znika; sprzęt jest odpytywany tylko, gdy sekcja jest otwarta |
 | `R` | uzgodnij ten węzeł teraz |
 | `G` | read everything from the node in the background — inside an endpoint, only that endpoint; the pane title counts down what is left |
 | `+` `-` | dodaj / usuń powiązanie |
@@ -428,11 +429,9 @@ typy endpointów i atrybuty wspólne — wszystko **wygenerowane** z
 ### Na prawdziwej magistrali (Linux)
 
 ```sh
-sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
-# prawdziwa magistrala zamiast wirtualnej:
-#   sudo ip link set can0 type can bitrate 500000 && sudo ip link set up can0
-
+sudo ./tools/can-up.sh vcan0          # wirtualna: hub jej nie zakłada, tylko sprawdza
 .venv/bin/lagun-hub run --config config/ --bus vcan0
+# prawdziwa magistrala: `--bus can0` albo wpis w hub.yaml — hub sam ustawi prędkość
 ```
 
 Drugą stronę kontraktu dają dziś **prawdziwe węzły** — patrz
@@ -492,20 +491,21 @@ stąd wiadomo, **co da się sprawdzić, zanim będzie drugi węzeł**.
 
 #### Podniesienie
 
-```bash
-sudo ./tools/can-up.sh can0 500000
-```
-
-albo ręcznie, bo to jedno polecenie:
-
-```bash
-sudo ip link set can0 up type can bitrate 500000 restart-ms 100
-```
+Robi to **hub, przy każdym starcie**: porównuje `can0` z wpisem w `hub.yaml`
+i doprowadza go do pliku — prędkość, `restart-ms 100`, bez FD, podniesiony — przez
+`ip link` wołane z `sudo -n` ([`lagunhub/buses.py`](lagunhub/buses.py)). Wypisuje,
+co ustawił (`bus … · set: bitrate, link`) albo że jest zgodny (`as configured`).
+Potrzebuje do tego reguły w sudoers dla `ip link set can*`; bez niej wstaje i zgłasza
+usterkę z gotową linijką do wklejenia.
 
 > **Bez `fd on`.** Ten kontroler umie CAN FD i chętnie by go użył, a specyfikacja
 > LagunBus mówi CAN 2.0B ([`05-mapowanie-can.md`](../lagunbus-spec/05-mapowanie-can.md)).
 
-Po restarcie RPi trzeba to powtórzyć — na razie ręcznie i to jest w porządku.
+Ręcznie, gdy trzeba bez huba (np. do `candump`):
+
+```bash
+sudo ./tools/can-up.sh can0 500000
+```
 
 #### Magistrala wirtualna — do prób bez sprzętu
 
@@ -527,16 +527,22 @@ cd ~/hub
 ```
 
 Skrypt instaluje `python3-venv` i `can-utils`, robi `.venv`, wkłada pakiet
-**edytowalnie** (`git pull` wystarcza do aktualizacji) i zakłada **czystą konfigurację
-w `~/lagun`**. Na koniec uruchamia `doctor`.
+**edytowalnie** (`git pull` wystarcza do aktualizacji), zakłada **czystą konfigurację
+w `~/lagun`** i regułę `/etc/sudoers.d/lagun-hub`, która pozwala hubowi — i tylko na to —
+wołać `ip link set can*` bez hasła. Dzięki niej `lagun-hub run` sam podnosi `can0`
+z prędkością z `hub.yaml`; bez niej hub wstaje, ale zgłasza usterkę z tą samą linijką
+do wklejenia.
 
-Bez skryptu to są cztery polecenia:
+Bez skryptu to są cztery polecenia i reguła:
 
 ```bash
 sudo apt install python3-venv can-utils
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 .venv/bin/lagun-hub init ~/lagun --bus can0
+echo "$(id -un) ALL=(root) NOPASSWD: $(command -v ip) link set can*" \
+  | sudo tee /etc/sudoers.d/lagun-hub && sudo chmod 0440 /etc/sudoers.d/lagun-hub
+sudo visudo -c                                 # czy sudo dalej działa
 ```
 
 #### Konfiguracja leży POZA klonem
@@ -653,13 +659,10 @@ lagun-sim key --bus vcan0
 
 ### Czy wszystko gotowe
 
-```bash
-.venv/bin/lagun-hub doctor
-```
-
-Wypisuje, co jest gotowe, a co nie — **razem z poleceniem, które to naprawia**. Kod
-wyjścia zero znaczy „startuj". Wiersz `interfejs can0` mówi, czy **gniazdo naprawdę
-się otwiera**; to jedyne sprawdzenie, które robi dokładnie to, co zrobi hub.
+Odpowiada `lagun-hub run`: co go blokuje — zły `hub.yaml`, magistrala, która się nie
+otwiera — wypisuje jednym zdaniem i kończy z kodem 2; zajęty port API zgłasza jako
+usterkę i pracuje dalej. Osobnego polecenia sprawdzającego nie ma — `doctor` usunięto
+w FEAT-01, bo powtarzał sprawdzenia huba własnym, rozjeżdżającym się kodem.
 
 Magistrala od drugiej strony, bez huba:
 
@@ -679,8 +682,8 @@ cansend can0 123#DEADBEEF     # ramka z palca
 | Objaw | Gdzie szukać |
 |---|---|
 | `dmesg` milczy o `mcp` | nakładka nie wczytana albo brakuje `dtparam=spi=on` |
-| jest `can0`, ale `doctor` mówi „bez taktowania" | interfejs wstał bez `bitrate` — `can-up.sh` |
-| `doctor`: gniazdo się nie otwiera | uprawnienia; sprawdź, na jakim użytkowniku pracujesz |
+| jest `can0`, ale `ip -details link show can0` nie pokazuje `bitrate` | interfejs wstał bez taktowania — `can-up.sh` |
+| `run`: „cannot open the bus" | interfejsu nie ma (`ip link show`) albo uprawnienia — sprawdź, na jakim użytkowniku pracujesz |
 | hub wstaje, ale nie widzi węzłów | najpierw `candump can0` — jeśli tam cisza, to nie hub |
 | ramki są, ale bez sensu | **rezonator**; sprawdź `oscillator=` w `config.txt` |
 | hub kończy z kodem 2 | konfiguracja — komunikat powie, która linia |

@@ -407,11 +407,12 @@ groups:
   5: { name: "Salon" }
 
 buses:
-  - name: can0        # parter
-    interface: socketcan
-    channel: can0
-  - name: can1        # piętro
-    interface: socketcan
+  - name: parter
+    kind: socketcan     # droga do magistrali; wpis bez `kind` to też socketcan
+    channel: can0       # interfejs jądra
+    bitrate: 500000
+  - name: pietro
+    kind: socketcan
     channel: can1
 
 adapters:
@@ -425,6 +426,14 @@ adapters:
 commissioning:
   accept_new: false                 # tryb przyjmowania; wygasa sam po 15 min
 ```
+
+`kind` to **urządzenie, z którym hub rozmawia** — jego kontrakt — a nie medium:
+`socketcan` to każdy interfejs CAN, który widzi jądro (MCP2518FD na SPI, pałeczka USB,
+`vcan` do prób), wszystkie przez `ip link`. Adapter USR-CAN315 dojdzie jako `usr-can315`,
+**nie** `ethernet` — inne pudełko w Ethernecie przyszłoby z innym kontraktem (inne
+komendy, inny format ramek). Do tego czasu nieznany `kind` jest błędem konfiguracji, a nie wpisem, który się wczytuje i nic nie wozi
+([`zadania/FEAT-01.md`](../zadania/FEAT-01.md)). Kanał użyty dwa razy też jest błędem —
+dwa gniazda na jednym interfejsie słyszą każdą ramkę podwójnie.
 
 Nazwa magistrali (`can0`, ale też `parter`) jest **wyłącznie dla człowieka i dziennika** —
 w ramce numeru magistrali nie ma i nigdy nie będzie

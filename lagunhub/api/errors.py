@@ -44,6 +44,11 @@ class Problem(Enum):
     Different from `INVALID`: there the request is broken, here the request is fine and
     it is the **result** that does not hold up."""
 
+    HARDWARE = "hardware"
+    """The hardware under a bus refused or did not answer — `ip link` without the sudo
+    rule, an adapter off the network. Not a node and not the hub: the third party in
+    between (zadania/FEAT-01.md)."""
+
 
 class ApiError(Exception):
     def __init__(self, problem: Problem, message: str, *, result: str | None = None) -> None:

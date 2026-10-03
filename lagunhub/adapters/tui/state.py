@@ -27,6 +27,7 @@ from lagunhub.adapters.client.client import Hub
 from lagunhub.api import (
     ApiError,
     BindingView,
+    BusSetupView,
     CommissioningView,
     DiffRow,
     EndpointView,
@@ -58,6 +59,7 @@ class Section(Enum):
     BINDINGS = "Bindings"
     DIFF = "Drift"
     ISSUES = "Issues"
+    BUSES = "Buses"
     JOINING = "Joining"
     HEALTH = "Health"
 
@@ -115,6 +117,9 @@ class Snapshot:
     issues: tuple[str, ...] = ()
     joining: CommissioningView | None = None
     health: HealthView | None = None
+    buses: tuple[BusSetupView, ...] = ()
+    """The hardware under each bus. Asked for only while `Buses` is open — every look
+    runs `ip` on the hub; outside the section the last answer stays."""
     node: NodeView | None = None
     """An expanded node — fetched separately, because nobody needs all of them at once."""
 
@@ -236,6 +241,7 @@ class State:
                 issues=self.hub.issues(),
                 joining=self.hub.commissioning(),
                 health=self.hub.health(),
+                buses=(self.hub.buses() if self.section is Section.BUSES else self.snapshot.buses),
                 node=self._node(ref),
                 etag=self.hub.config().etag,
                 at=time.monotonic(),

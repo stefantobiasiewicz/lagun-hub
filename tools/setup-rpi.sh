@@ -35,8 +35,32 @@ else
     .venv/bin/lagun-hub init "$CONFIG" --bus can0
 fi
 
-echo
-LAGUN_CONFIG="$CONFIG" .venv/bin/lagun-hub doctor || true
+echo "== permission to set the CAN interfaces up"
+# The hub brings can0… to its entry in hub.yaml at every start (`ip link`, through
+# `sudo -n`) — that is what makes starting it one command (zadania/FEAT-01.md, R3, R5).
+# `ip link set` needs root, the hub runs as this user, so it gets exactly that and no
+# more: a rule for `ip link set can*`. Not CAP_NET_ADMIN on the interpreter (every
+# Python script would get it) and not a systemd unit (the hub runs in a shell).
+#
+# `can*` covers every argument after the name, so the rule also allows e.g. renaming a
+# CAN interface — a known width, kept because a narrower sudoers pattern cannot say
+# "only bitrate, restart-ms, fd, up and down". Virtual `vcan*` is NOT covered: creating
+# one takes modprobe and `ip link add`, and the hub only checks it (R7).
+#
+# Checked with `visudo -c` before it goes in: a broken file in /etc/sudoers.d can lock
+# sudo out for everyone on the machine.
+IP="$(command -v ip || echo /usr/sbin/ip)"
+RULE="$(id -un) ALL=(root) NOPASSWD: $IP link set can*"
+CANDIDATE="$(mktemp)"
+trap 'rm -f "$CANDIDATE"' EXIT
+echo "$RULE" > "$CANDIDATE"
+if sudo visudo -cqf "$CANDIDATE"; then
+    sudo install -m 0440 -o root -g root "$CANDIDATE" /etc/sudoers.d/lagun-hub
+    echo "   /etc/sudoers.d/lagun-hub: $RULE"
+else
+    echo "   visudo rejected the rule, nothing written: $RULE" >&2
+    echo "   without it the hub starts, but cannot set can0 up — it says so in Issues" >&2
+fi
 
 cat <<NEXT_STEPS
 
@@ -44,10 +68,9 @@ Next, by hand:
 
   once                echo 'export LAGUN_CONFIG=$CONFIG' >> ~/.bashrc && exec bash
 
-  the bus             sudo ./tools/can-up.sh can0 500000
-                      sudo ./tools/can-up.sh vcan0          (virtual, for trials)
-
   the hub             .venv/bin/lagun-hub run
+                      (it sets can0 up by itself — bitrate from hub.yaml)
+  a virtual bus       sudo ./tools/can-up.sh vcan0          (trials; the hub only checks it)
   traffic, no hub     candump can0
   the view            .venv/bin/lagun-hub tui                (from a second terminal)
 

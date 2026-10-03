@@ -117,6 +117,7 @@ def _nav(stdscr: Any, state: State, top: int, height: int) -> None:
         Section.BINDINGS: sum(len(b.targets) for b in state.snapshot.bindings),
         Section.DIFF: sum(1 for r in state.snapshot.diff if r.state != "match"),
         Section.ISSUES: len(state.snapshot.issues),
+        Section.BUSES: len(state.snapshot.buses),
         Section.JOINING: len(state.snapshot.joining.known) if state.snapshot.joining else 0,
         Section.HEALTH: 0,
     }
