@@ -613,6 +613,10 @@ def traffic_row(item: TrafficView) -> tuple[str, int]:
     if item.result:
         what = f"{what} {item.result}".strip()
     took = f"{item.elapsed * 1000:.1f} ms" if item.elapsed is not None else ""
+    if item.late:
+        took = f"{took} late".strip()
+    if item.retry:
+        took = f"{took} retry {item.retry}".strip()
     colour = NORMAL
     if item.result and item.result != "OK":
         colour = BAD

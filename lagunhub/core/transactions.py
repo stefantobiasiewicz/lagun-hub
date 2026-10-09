@@ -94,6 +94,23 @@ class Outcome:
         return self.result == ResultCode.OK
 
 
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """What the hub asked — all that is needed to name a reply and time it."""
+
+    kind: int
+    """The kind of the **request**. The element namespace depends on it: `0x02` is the
+    `Toggle` command or the `Red` attribute (01-model-danych.md §3), and the reply
+    itself does not say which."""
+
+    started: float
+    """When the first attempt went out. Retries keep `Tid` and this moment alike."""
+
+    late: bool
+    """The transaction had already closed when the reply came — an answer to a retry,
+    or one after the hub gave up."""
+
+
 @dataclass
 class Pending:
     bus: int
@@ -135,6 +152,16 @@ class TransactionManager:
         self._clock = clock
         self.tids = tids or TidAllocator()
         self._pending: dict[tuple[int, int], Pending] = {}
+        self._closed: dict[tuple[int, int], Asked] = {}
+        """The last closed request for every key + `Tid` — to name a reply that comes
+        after its transaction closed (zadania/BUG-03.md).
+
+        **No time window.** A key + `Tid` is reused only by the hub itself (one counter
+        for both threads, `TidAllocator`), and a new request overwrites the entry — so
+        until then the entry is the only request a reply could answer. A window would
+        lose the name exactly when replies are latest: the third attempt goes out at
+        200 ms, and its reply may come well after 300 ms. The size is bounded by the
+        allocator: at most eight entries per key the hub has ever sent on."""
 
         self.opened = 0
         self.answered = 0
@@ -182,6 +209,7 @@ class TransactionManager:
             bus=bus, can_id=can_id, payload=payload, tid=tid, started=now, on_done=on_done
         )
         self._pending[pending.key] = pending
+        self._closed.pop(pending.key, None)
         self.opened += 1
         if send:
             self._send(bus, Frame(can_id, payload))
@@ -190,28 +218,31 @@ class TransactionManager:
 
     # --- replies -------------------------------------------------------------
 
-    def request_kind(self, can_id: int, tid: int) -> int | None:
-        """The kind of the **request** this reply matches.
+    def open(self, can_id: int, tid: int) -> Pending | None:
+        """The open transaction of a request going out — to tell a retry from the first
+        attempt.
 
-        Without it the element in a reply cannot be named: `0x02` is either the `Toggle`
-        command or the `Red` attribute, depending on what was asked — and the reply
-        itself does not carry that. The element namespace depends on the frame kind
-        (01-model-danych.md §3).
+        On the wire the two are the same frame with the same `Tid`
+        (04-interakcje.md §2.1); only the manager knows how many times it has been sent.
+        `_retry` counts the attempt **before** sending, and `track` registers the first
+        one before it goes out, so whoever announces the frame sees the right number.
         """
-        pending = self._pending.get((can_id & KEY_MASK, tid))
-        if pending is None:
-            return None
-        return (pending.can_id >> 25) & 0xF
+        return self._pending.get((can_id & KEY_MASK, tid))
 
-    def started(self, can_id: int, tid: int) -> float | None:
-        """When the request this reply matches went out.
+    def asked(self, can_id: int, tid: int) -> Asked | None:
+        """The request this reply answers — open, or the last one closed with this
+        key + `Tid`.
 
-        The traffic watch shows the reply time on every frame, and only whoever
-        remembers the request can compute it. One has to ask **before** `on_response`,
-        because that closes the transaction and forgets.
+        The traffic watch names the element after the request kind and shows the time
+        since the request; both are known only to whoever remembers it. Asked
+        **before** `on_response`, because that closes the transaction. `None` means the
+        hub never sent anything this could answer — the caller must not guess.
         """
-        pending = self._pending.get((can_id & KEY_MASK, tid))
-        return pending.started if pending else None
+        key = (can_id & KEY_MASK, tid)
+        pending = self._pending.get(key)
+        if pending is not None:
+            return Asked(kind=_kind_of(pending.can_id), started=pending.started, late=False)
+        return self._closed.get(key)
 
     def on_response(self, frame: Frame) -> bool:
         """Match a reply to a request. ``False`` means "not mine"."""
@@ -297,6 +328,9 @@ class TransactionManager:
         pending.timer = self._schedule.after(now, TIMEOUT, lambda: self._expire(pending))
 
     def _finish(self, pending: Pending, code: ResultCode | None, data: bytes) -> None:
+        self._closed[pending.key] = Asked(
+            kind=_kind_of(pending.can_id), started=pending.started, late=True
+        )
         if pending.on_done is None:
             return
         pending.on_done(
@@ -310,3 +344,7 @@ class TransactionManager:
 
 
 _CODES: Final = {code.value for code in ResultCode}
+
+
+def _kind_of(can_id: int) -> int:
+    return (can_id >> 25) & 0xF

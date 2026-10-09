@@ -309,6 +309,26 @@ class TestTraffic:
         assert "0x001 ep4" in command and "Toggle" in command
         assert "RESPONSE" in response and "OK" in response and "3.1 ms" in response
 
+    def test_a_late_reply_says_so(self) -> None:
+        """An answer after its transaction closed — the hub retried (BUG-03)."""
+        from dataclasses import replace
+
+        from tests.fake_hub import TRAFFIC
+
+        late = panes.traffic_row(replace(TRAFFIC[1], elapsed=0.1081, late=True))[0]
+        assert late.endswith("108.1 ms late") and "Toggle OK" in late
+        assert "late" not in panes.traffic_row(TRAFFIC[1])[0]
+
+    def test_a_retry_says_so(self) -> None:
+        """On the wire a retry is the same frame with the same `Tid` (BUG-03)."""
+        from dataclasses import replace
+
+        from tests.fake_hub import TRAFFIC
+
+        retry = panes.traffic_row(replace(TRAFFIC[0], elapsed=0.1002, retry=1))[0]
+        assert "→" in retry and "Toggle" in retry and retry.endswith("100.2 ms retry 1")
+        assert "retry" not in panes.traffic_row(TRAFFIC[0])[0]
+
     def test_a_refusal_is_red(self) -> None:
         from tests.fake_hub import TRAFFIC
 

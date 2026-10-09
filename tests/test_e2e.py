@@ -11,17 +11,20 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import pytest
+
 from lagunhub.core.bindings import BindingEngine
 from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.hub import CoreThread
-from lagunhub.core.model import Installation, NodeModel, NodeState, Uid
+from lagunhub.core.model import EndpointModel, Installation, NodeModel, NodeState, Uid
 from lagunhub.core.rx import ColdItem, RxThread, Sent
+from lagunhub.core.traffic import Traffic
 from lagunhub.core.transactions import Outcome
 from lagunhub.protocol.bus import Bus, VirtualBus, VirtualNetwork
 from lagunhub.protocol.endpoints import output as out
 from lagunhub.protocol.frame import Frame, encode_id
-from lagunhub.protocol.registry import MessageKind
+from lagunhub.protocol.registry import EndpointType, MessageKind
 from tests.conftest import Clock
 from tests.node.devices import key1, relay1
 from tests.node.endpoints.key_input import KeyInput
@@ -301,6 +304,81 @@ class TestRetriesLive:
         assert inst.core.transactions.opened == 1, (
             "a command sent by the fast path came under CORE's care"
         )
+
+
+class TestLateRepliesInTheFeed:
+    """A reply after its transaction has closed is still named after the REQUEST
+    (BUG-03).
+
+    `0x02` is the `Toggle` command or the `Red` attribute, and the reply alone does not
+    say which. Once the first reply closed the transaction, the second one was named from
+    the attribute table — "Red OK", an answer to something nobody sent.
+    """
+
+    def feed(self, inst: Rig, act: Callable[[], None]) -> list[Traffic]:
+        sub = inst.core.traffic.subscribe()
+        try:
+            act()
+            return [t for t in iter(lambda: sub.get(0), None)]
+        finally:
+            inst.core.traffic.unsubscribe(sub)
+
+    def known_relay(self, inst: Rig) -> None:
+        """Names come from the type catalogue, so the hub has to know the endpoint — as it
+        would after enumeration, which this rig skips."""
+        relay = inst.core.installation.nodes[Uid(bytes(range(8, 16)))]
+        relay.endpoints[4] = EndpointModel(4, EndpointType.Output)
+
+    def test_both_replies_to_a_repeated_toggle_are_named_toggle(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        inst = build(tmp_path)
+        self.known_relay(inst)
+        # The node carries the command out (at ≈85 ms, the press) but holds its transmit
+        # queue until 250 ms — the hub repeats at ≈185 ms, and both replies leave
+        # together, as with the interrupt serviced every 100 ms (FEAT-11).
+        inst.relay.faults.silent_until = inst.clock.now + 0.250
+
+        def click() -> None:
+            inst.click()
+            inst.run(0.200)
+
+        replies = [r for r in self.feed(inst, click) if r.kind == "RESPONSE"]
+
+        assert [r.name for r in replies] == ["Toggle", "Toggle"]
+        assert [r.late for r in replies] == [False, True]
+        first, second = replies
+        assert first.elapsed is not None and second.elapsed is not None
+        assert second.elapsed >= first.elapsed, "counted from the first attempt, too"
+
+    def test_a_retry_is_marked_as_one(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """On the wire a retry is the same frame with the same `Tid` — without a mark the
+        feed showed two identical `Toggle` rows, and the retry was found only on the
+        board."""
+        inst = build(tmp_path)
+        self.known_relay(inst)
+        inst.relay.faults.silent_until = inst.clock.now + 0.250
+
+        def click() -> None:
+            inst.click()
+            inst.run(0.200)
+
+        commands = [r for r in self.feed(inst, click) if r.kind == "COMMAND"]
+
+        assert [r.retry for r in commands] == [0, 1]
+        assert commands[0].elapsed is None, "the first attempt has nothing to count from"
+        assert commands[1].elapsed == pytest.approx(0.100, abs=0.010)
+
+    def test_a_reply_nobody_asked_for_is_not_named(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        """Without the request the namespace is unknown — the number, not a guess."""
+        inst = build(tmp_path)
+        self.known_relay(inst)
+
+        def stray() -> None:
+            inst.preview.send(Frame(encode_id(MessageKind.RESPONSE, 0x040, 4, out.TOGGLE), b"\x05"))
+            inst.run(0.010)
+
+        (reply,) = [r for r in self.feed(inst, stray) if r.kind == "RESPONSE"]
+        assert reply.name == ""
+        assert reply.elapsed is None and reply.late is False
 
 
 class TestSegmentsLive:

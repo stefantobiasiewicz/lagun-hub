@@ -1437,6 +1437,8 @@ def _traffic(item: Traffic) -> TrafficView:
         tid=item.tid,
         result=item.result,
         elapsed=item.elapsed,
+        late=item.late,
+        retry=item.retry,
         data=item.data.hex(),
     )
 

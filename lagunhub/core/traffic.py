@@ -44,7 +44,17 @@ class Traffic:
     tid: int | None = None
     result: str | None = None
     elapsed: float | None = None
-    """Time since the request — filled in for replies only."""
+    """Time since the first attempt of the request — on replies, and on retries. A reply
+    to a retry shows how long the hub has really been waiting."""
+
+    late: bool = False
+    """A reply that came after its transaction closed — an answer to a retry, or one
+    after the hub gave up (zadania/BUG-03.md). A sign of latency on the bus worth seeing
+    when hunting a fault."""
+
+    retry: int = 0
+    """On a request the hub sends: which retry this is, 0 for the first attempt. On the
+    wire a retry is indistinguishable — the same frame, the same `Tid`."""
 
     data: bytes = b""
 

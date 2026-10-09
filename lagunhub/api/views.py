@@ -382,6 +382,12 @@ class TrafficView:
     tid: int | None = None
     result: str | None = None
     elapsed: float | None = None
+    late: bool = False
+    """The reply came after its transaction closed (`core/traffic.py`)."""
+
+    retry: int = 0
+    """Which retry of a request the hub sends; 0 for the first attempt."""
+
     data: str = ""
 
 

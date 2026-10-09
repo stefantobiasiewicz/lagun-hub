@@ -303,18 +303,33 @@ class CoreThread(threading.Thread):
         tid: int | None = None
         result: str | None = None
         elapsed: float | None = None
+        late = False
+        retry = 0
+        if kind in (MessageKind.RESPONSE, MessageKind.LONG_RESPONSE):
+            # A reply's element is named after the REQUEST KIND: `0x02` is either the
+            # `Toggle` command or the `Red` attribute, depending on what was asked. A
+            # reply the hub cannot pair with a request gets no name at all — the view
+            # shows the number rather than a guess (zadania/BUG-03.md).
+            kind_name = None
         if kind in TRANSACTIONAL and frame.data:
             code, tid = decode_header(frame.data[0])
             if kind in (MessageKind.RESPONSE, MessageKind.LONG_RESPONSE):
                 result = _result_name(code)
-                started = self.transactions.started(frame.can_id, tid)
-                elapsed = (self.clock() - started) if started is not None else None
-                # A reply's element is named after the REQUEST KIND: `0x02` is either
-                # the `Toggle` command or the `Red` attribute, depending on what was
-                # asked.
-                question = self.transactions.request_kind(frame.can_id, tid)
-                if question is not None:
-                    kind_name = _kind(question)
+                # Also after the transaction closed: the second reply to a retried
+                # `Toggle` used to be named from the attribute table — "Red OK".
+                asked = self.transactions.asked(frame.can_id, tid)
+                if asked is not None:
+                    kind_name = _kind(asked.kind)
+                    elapsed = self.clock() - asked.started
+                    late = asked.late
+            elif outgoing:
+                # A retry is the same frame with the same `Tid` — without a mark the
+                # feed showed two identical rows, and the retry was found only on the
+                # board (zadania/BUG-03.md).
+                pending = self.transactions.open(frame.can_id, tid)
+                if pending is not None and pending.attempts > 1:
+                    retry = pending.attempts - 1
+                    elapsed = self.clock() - pending.started
 
         uid = self.installation.by_address.get(fields.address)
         wire.publish(
@@ -332,6 +347,8 @@ class CoreThread(threading.Thread):
                 tid=tid,
                 result=result,
                 elapsed=elapsed,
+                late=late,
+                retry=retry,
                 data=frame.data,
             )
         )
@@ -343,7 +360,7 @@ class CoreThread(threading.Thread):
         node = self.installation.nodes.get(uid) if uid is not None else None
         model = node.endpoints.get(endpoint) if node else None
         definition = model.definition if model else None
-        if definition is None:
+        if definition is None or kind is None:
             return ""
         if kind in (MessageKind.COMMAND, MessageKind.GROUP_COMMAND):
             meta = definition.commands.get(element)
