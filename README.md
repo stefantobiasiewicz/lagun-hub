@@ -592,7 +592,12 @@ echo 'export LAGUN_CONFIG=$HOME/lagun' >> ~/.bashrc && exec bash
 ```
 
 Od tej pory żadne polecenie nie potrzebuje `--config`. Kolejność jest taka:
-`--config` bije `$LAGUN_CONFIG`, a ten bije `./config`.
+`--config` bije `$LAGUN_CONFIG`, a ten bije `~/lagun`.
+
+`init` is optional: `lagun-hub run` on a directory holding none of the three files — or
+on one that does not exist — sets up the same clean configuration itself and starts with
+an empty installation (`--bus` gives the interface; `can0` otherwise). A directory with
+even one of them is somebody's configuration and is never filled in.
 
 #### Uruchomienie
 

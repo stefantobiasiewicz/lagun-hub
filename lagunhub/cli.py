@@ -32,6 +32,7 @@ from lagunhub.core.config import (
     load,
 )
 from lagunhub.core.config.apply import apply
+from lagunhub.core.config.loader import DEFAULT_CONFIG, FILES
 from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.hub import CoreThread
 from lagunhub.core.model import Installation, Snapshot
@@ -424,6 +425,28 @@ def _bring_up(config: BusConfig) -> buses.Outcome:
     return buses.bring_up(config, SocketCanDriver(config.channel))
 
 
+def _clean_if_empty(where: Path, channel: str) -> list[Path]:
+    """Set up a clean configuration where there is none — and only there.
+
+    No configuration is not an error: it is an installation that has not begun. A hub
+    that refuses to start until somebody runs `init` makes them run a step whose whole
+    content the hub has anyway (`scaffold.init`). "None" means **none of the three
+    files**: a directory with one broken file is somebody's configuration, and it is
+    loaded and refused as such, never covered with empty ones — `init` overwrites nothing.
+
+    A path to a single `.yaml` file that does not exist is not set up: one file is a
+    choice somebody made, and guessing its content would be guessing that choice.
+    Returns the files created.
+    """
+    if where.suffix in (".yaml", ".yml"):
+        if not where.exists():
+            raise scaffold.InitError(f"{where}: no such file")
+        return []
+    if where.is_dir() and any((where / name).exists() for name in FILES):
+        return []
+    return scaffold.init(where, channel=channel)
+
+
 def _ephemeral_config(source: Path | None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
     """A configuration in a temporary directory, removed when the hub stops.
 
@@ -485,7 +508,12 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("run", help="start the hub with a configuration")
     # `None` means "not given", which `--ephemeral` needs to tell apart from the default.
-    run.add_argument("--config", type=Path, default=None, help="by default ./config")
+    run.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help=f"by default ${CONFIG_ENV} or {DEFAULT_CONFIG}; set up clean when empty",
+    )
     run_source = run.add_mutually_exclusive_group()
     run_source.add_argument(
         "--bus", action="append", default=None, help="overrides buses from the file"
@@ -555,6 +583,18 @@ def main(argv: list[str] | None = None) -> int:
         origin = f"a copy of {args.config or os.environ[CONFIG_ENV]}" if named else "clean"
         print(f"temporary configuration ({origin}), removed on exit: {where}", flush=True)
         print(f"   the view:  lagun-hub tui --config {where}", flush=True)
+    else:
+        try:
+            created = _clean_if_empty(where, (args.bus or ["can0"])[0])
+        except scaffold.InitError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
+        if created:
+            print(
+                f"no configuration in {where} — set up a clean one "
+                f"({', '.join(file_.name for file_ in created)}); the installation starts empty",
+                flush=True,
+            )
     try:
         return _run(args, where)
     finally:

@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 
 from lagunhub import scaffold
-from lagunhub.core.config import CONFIG_ENV, BusKind, default_config, load
+from lagunhub.cli import _clean_if_empty, main
+from lagunhub.core.config import CONFIG_ENV, BusKind, ConfigError, default_config, load
 from lagunhub.core.config.loader import FILES
 
 
@@ -91,20 +92,62 @@ class TestDirectoryLookup:
         monkeypatch.setenv(CONFIG_ENV, "/house/lagun")
         assert default_config() == Path("/house/lagun")
 
-    def test_without_the_variable_the_current_directory_is_used(
+    def test_without_the_variable_it_is_lagun_in_home(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Not `./config`: a hub that sets up a clean configuration where it finds none
+        would plant an installation in whatever directory it was started from."""
         monkeypatch.delenv(CONFIG_ENV, raising=False)
-        assert default_config() == Path("config")
+        assert default_config() == Path.home() / "lagun"
 
     def test_an_empty_variable_does_not_yield_an_empty_path(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(CONFIG_ENV, "")
-        assert default_config() == Path("config")
+        assert default_config() == Path.home() / "lagun"
 
     def test_the_advice_gives_an_absolute_path(self, tmp_path: Path) -> None:
         """A line to paste into `.bashrc` — with a relative path it would be a trap."""
         text = scaffold.advice(tmp_path)
         assert f"export {CONFIG_ENV}={tmp_path}" in text
         assert os.path.isabs(str(tmp_path))
+
+
+class TestNoConfigurationAtRun:
+    """`lagun-hub run` where there is no configuration: an installation that has not
+    begun, not an error."""
+
+    def test_a_missing_directory_is_set_up_clean(self, tmp_path: Path) -> None:
+        where = tmp_path / "lagun"
+        created = _clean_if_empty(where, "can0")
+
+        assert [p.name for p in created] == list(FILES)
+        config = load(where)
+        assert config.nodes == () and config.bindings == ()
+        assert [bus.channel for bus in config.buses] == ["can0"]
+
+    def test_an_empty_directory_too(self, tmp_path: Path) -> None:
+        assert _clean_if_empty(tmp_path, "vcan0")
+        assert [bus.channel for bus in load(tmp_path).buses] == ["vcan0"]
+
+    def test_one_file_is_somebody_s_configuration(self, tmp_path: Path) -> None:
+        """Loaded — and refused if broken — never covered with empty files."""
+        (tmp_path / "nodes.yaml").write_text("nodes: {}\n", encoding="utf-8")
+
+        assert _clean_if_empty(tmp_path, "can0") == []
+        assert not (tmp_path / "hub.yaml").exists()
+
+    def test_a_missing_single_file_is_said_not_guessed(self, tmp_path: Path) -> None:
+        with pytest.raises(scaffold.InitError, match="no such file"):
+            _clean_if_empty(tmp_path / "house.yaml", "can0")
+
+    def test_run_says_so_without_a_traceback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """It used to end in `FileNotFoundError` from deep inside the YAML reader."""
+        assert main(["run", "--udp", "--config", str(tmp_path / "house.yaml")]) == 2
+        assert "house.yaml: no such file" in capsys.readouterr().err
+
+    def test_the_loader_says_so_too(self, tmp_path: Path) -> None:
+        with pytest.raises(ConfigError, match="no such file"):
+            load(tmp_path / "house.yaml")

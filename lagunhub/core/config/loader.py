@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from ruamel.yaml import YAML
 
@@ -58,12 +58,23 @@ clone of the repository**: `git pull` would collide with it at every update, and
 house. Set once in `.bashrc`, it saves `--config` on every command."""
 
 
+DEFAULT_CONFIG: Final = "~/lagun"
+"""Where the configuration lives when nothing says otherwise — the place `init` and the
+README have always advised.
+
+It used to be `./config`, relative to wherever the hub was started. Now that `run` sets up
+a clean configuration where it finds none, that default would plant a second, empty
+installation in any directory the hub happened to be started from — a service with
+`cwd=/` included. One fixed place means one installation, and `tui` finds it the same
+way. The example in the repository is still `--config config/`, said out loud."""
+
+
 def default_config() -> Path:
-    """The configuration directory: from the variable or `./config`. `--config` beats
+    """The configuration directory: from the variable or `~/lagun`. `--config` beats
     both."""
     import os
 
-    return Path(os.environ.get(CONFIG_ENV) or "config")
+    return Path(os.environ.get(CONFIG_ENV) or DEFAULT_CONFIG).expanduser()
 
 
 class ConfigError(ValueError):
@@ -163,6 +174,8 @@ def _read(where: Path) -> dict[str, Any]:
         if not merged:
             raise ConfigError(f"{where}: none of the files {', '.join(FILES)} is present")
         return merged
+    if not where.exists():
+        raise ConfigError(f"{where}: no such file")
     document = yaml.load(where)
     if not isinstance(document, dict):
         raise ConfigError(f"{where}: expected a mapping at the top level")
