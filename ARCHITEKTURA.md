@@ -405,7 +405,7 @@ trzeba odbudować po przeadresowaniu**.
 
 ## 7. Wątki
 
-Cztery, plus wątek klienta MQTT, którym zarządza biblioteka.
+Pięć, plus wątek klienta MQTT, którym zarządza biblioteka.
 
 | Wątek | Blokuje na | Odpowiada za | Czego mu nie wolno |
 |---|---|---|---|
@@ -413,6 +413,13 @@ Cztery, plus wątek klienta MQTT, którym zarządza biblioteka.
 | **CORE** | `queue.get(timeout=…)` | model, transakcje, timery, enumeracja, przyłączanie, obecność | blokującego I/O — od tego są STORE i NORTH |
 | **STORE** | własna kolejka | zapis do SQLite z opóźnieniem | odpowiadania komukolwiek w czasie rzeczywistym |
 | **ADAPTER** | gniazdo HTTP albo kolejka | tłumaczenie modelu na API / MQTT i komend z powrotem | dotykania modelu inaczej niż przez kolejkę CORE (§10.7) |
+| **BUSWATCH** | `Event.wait(1 s)` | looking at each SocketCAN interface, bringing a failed one back up (§9.3) | touching the model other than through CORE's queue; running `ip` on CORE's behalf |
+
+**No hub thread ends on a failing bus** (`zadania/zrobione/BUG-04.md`). An `OSError` from one bus is
+counted against that bus — in RX on `recv`, by the sender on `send` — and the thread goes
+on with the others. A thread that ends anyway, for another reason, is said once on stderr
+and in the issues (`cli._dead_threads`), and the API answers at once that CORE has stopped
+instead of waiting out its timeout.
 
 ### 7.1 Dlaczego nie ma wątku TX
 
@@ -431,6 +438,11 @@ nieblokujący, więc `send()` zgłasza wyjątek zamiast czekać.
 |---|---|
 | ścieżka szybka | porzuca, podbija licznik, **nie powtarza** — komenda spóźniona jest gorsza niż brak |
 | CORE | oddaje żądanie własnemu timerowi; powtórzenie i tak jest w transakcji |
+
+The same for a bus that is down (`ENETDOWN` on every `send` while the interface is down):
+both senders catch any `OSError`, not only `ENOBUFS`, and count the frame as dropped. Before
+`zadania/zrobione/BUG-04.md` that error ended the thread — RX on a binding's command, CORE on a
+retry, and with CORE the API.
 
 ### 7.2 Timery bez wątku timera
 
@@ -700,6 +712,35 @@ class Bus(Protocol):
 
 `VirtualBus` udaje **arbitraż**: przy dwóch ramkach gotowych jednocześnie przepuszcza tę
 o niższym identyfikatorze. Bez tego testy priorytetów nie znaczyłyby nic.
+
+### 9.3 A SocketCAN bus that goes down
+
+What the kernel does to a CAN_RAW socket: as the interface goes `down`, `recv` fails
+**once** with `ENETDOWN`; while it is down, every `send` fails with `ENETDOWN`; after `up`
+the same socket works again, because it is bound to the interface's *index*, not its state.
+An interface that goes away (a USB adapter pulled out) fails `recv` once with `ENODEV`, and
+comes back — if it does — under a new index the old socket never hears.
+
+**Who took it down decides** (`zadania/zrobione/BUG-04.md`). The hub takes an interface down only
+when it reconfigures it (`bus_apply`, "apply" in the `Buses` view); it tells the watch
+first (`BusWatch.planned`) and that break is not reported. Any other way down — the
+controller's driver, `ip link` in another terminal, the adapter pulled out, the interface
+down at start — is a **failure**: reported at once, and brought back up by the hub with the
+same `buses.bring_up` the start uses. Three attempts (1 s, 5 s, 30 s); none when sudo wants
+a password; more than three failures in ten minutes and the hub stops and says it is the
+hardware. Having given up it still looks, and a bus brought up by hand, or an interface
+that comes back, is picked up without a restart.
+
+| piece | does |
+|---|---|
+| `RxThread` | survives the `OSError`, counts it (`rx.errors`); registers each bus's **current** descriptor with `select` on every turn — by number, not by the bus object |
+| `SocketCanBus` | `missing_ok` at start: no interface yet gives an unbound socket instead of an error, so the bus is still the hub's; `reopen()` swaps the socket in place — RX, the engine and CORE each hold the bus, not the socket |
+| `BusWatch` (`lagunhub/buswatch.py`) | once a second reads `flags` and `ifindex` in `/sys/class/net/<channel>` — no process, no privileges; up, down, gone, or back under a new index. Repairs and reopens on its own thread: `sudo ip` can take seconds and CORE answers nodes in milliseconds. Reports go into the issues through CORE's queue |
+| `BusView.link` / `BusSetupView.link` | `up`, `planned`, `failure`, `gave-up` (`fault` says why) — in `health`, `/buses` and the view |
+
+The watch does not rely on RX seeing the error: RX sees `ENETDOWN` only if it was waiting
+on the socket at that moment, and never sees an interface that was down before the hub
+started. Only SocketCAN is watched; other kinds of bus only "do not die".
 
 ---
 
@@ -1109,6 +1150,7 @@ hub/                         ← repozytorium
 │   │   ├── tui/             widok pełnoekranowy nad tym klientem
 │   │   └── mqtt/            Home Assistant — §14.2
 │   ├── buses.py             start: sterownik ustawia magistralę, potem gniazdo (FEAT-01)
+│   ├── buswatch.py          a SocketCAN bus down, not by the hub, is a failure — reported, brought up (BUG-04)
 │   ├── monitor.py           podgląd ruchu i modelu
 │   └── cli.py               wiersz poleceń
 │
@@ -1240,6 +1282,7 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 | **`fsync` na karcie SD** | dziesiątki do setek ms; dlatego zapis jest w wątku STORE (§5.2) |
 | **zegar** | RPi bez RTC wstaje w 1970 i wraca do teraz po `ntp` |
 | **wiele magistral** | zaprojektowane i skompilowane, ale każdy test używa jednej |
+| **a SocketCAN bus going down** (§9.3) | tested on a fake `/sys` and a fake socket only (`zadania/zrobione/BUG-04.md`). On the RPi: `ip link set can0 down` under traffic → `FAILURE`, back within ~1 s; the same without the sudo rule → `GAVE UP` at once, then `up` by hand → working again; "apply" in `Buses` → no alarm; start with `can0` down; a USB adapter out and back in → socket reopened. Also to confirm: `send` while down gives `ENETDOWN` every time, and why the hub saw `ENETDOWN` right at start on 2026-10-06 (a bare `bind` to a down interface should not give it) |
 | **magistrala przez USR-CAN315** | sterownik konfiguracyjny jest (`drivers/usr_can315/`), transportu ramek `PROTOL` po TCP nie ma — `zadania/FEAT-10.md` |
 
 ### 14.2 Adapter MQTT i Home Assistant

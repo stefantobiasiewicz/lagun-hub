@@ -513,6 +513,21 @@ usterkę z gotową linijką do wklejenia.
 > **Bez `fd on`.** Ten kontroler umie CAN FD i chętnie by go użył, a specyfikacja
 > LagunBus mówi CAN 2.0B ([`05-mapowanie-can.md`](../lagunbus-spec/05-mapowanie-can.md)).
 
+#### When `can0` goes down under a running hub
+
+**The hub keeps it up.** `can0` going down by any other hand than the hub's — the
+controller's driver, `ip link set can0 down` in another terminal, the adapter pulled out,
+`can0` down when the hub started — is a **failure**: the hub says so at once (Issues, and
+`FAILURE` in `Buses` and health) and brings the bus back up by itself, with the same sudo
+rule as at start: three attempts, 1 s, 5 s and 30 s apart. If it cannot (no sudo rule, the
+interface is gone, it keeps failing — more than three times in ten minutes), it says why
+and stops trying (`GAVE UP`); bring the bus up by hand, or plug the adapter back, and the
+hub picks it up without a restart. "Apply" in `Buses` takes the bus down too — that one is
+the hub's own and is not a failure. Details: [`ARCHITEKTURA.md`](ARCHITEKTURA.md) §9.3.
+
+**To keep `can0` down for service, stop the hub** — otherwise it brings it back up within
+seconds.
+
 Ręcznie, gdy trzeba bez huba (np. do `candump`):
 
 ```bash
@@ -697,6 +712,8 @@ cansend can0 123#DEADBEEF     # ramka z palca
 | jest `can0`, ale `ip -details link show can0` nie pokazuje `bitrate` | interfejs wstał bez taktowania — `can-up.sh` |
 | `run`: „cannot open the bus" | interfejsu nie ma (`ip link show`) albo uprawnienia — sprawdź, na jakim użytkowniku pracujesz |
 | hub wstaje, ale nie widzi węzłów | najpierw `candump can0` — jeśli tam cisza, to nie hub |
+| `FAILURE` / `GAVE UP` next to a bus | the interface went down not by the hub; the fault line in `Buses` says what the hub tried and why it stopped — usually the sudo rule (`tools/setup-rpi.sh`) or the adapter |
+| `the hub's RX/CORE thread has stopped — restart the hub` | a bug, not the bus: the traceback above it in the console belongs in a report |
 | ramki są, ale bez sensu | **rezonator**; sprawdź `oscillator=` w `config.txt` |
 | hub kończy z kodem 2 | konfiguracja — komunikat powie, która linia |
 | everything works, but every answer takes ~100 ms and `retried` keeps growing | the interrupt pin: `dmesg \| grep -B2 "Disabling IRQ"` and `grep spi0.0 /proc/interrupts` — a counter that stands still while frames arrive means `interrupt=` is not where INT goes (see SPI i nakładka) |

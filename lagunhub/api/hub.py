@@ -32,7 +32,7 @@ import threading
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import fields, replace
 from typing import Any, Protocol
 
@@ -66,6 +66,7 @@ from lagunhub.api.views import (
     TargetView,
     TrafficView,
 )
+from lagunhub.buswatch import BusWatch
 from lagunhub.core.bindings import BindingEngine
 from lagunhub.core.config.loader import ConfigError
 from lagunhub.core.config.model import BusConfig, Config
@@ -190,9 +191,13 @@ class HubApi:
         timeout: float = DEFAULT_TIMEOUT,
         wait: Waiter = block,
         drivers: DriverFactory = socketcan_driver,
+        watch: BusWatch | None = None,
     ) -> None:
         self.core = core
         self.drivers = drivers
+        self.watch = watch
+        """The watch over SocketCAN buses: told about a planned break, asked for the
+        state of a link (zadania/zrobione/BUG-04.md). `None` without SocketCAN buses."""
         self._applying = threading.Lock()
         """One `apply` at a time: two would interleave their `ip link set … down/up`."""
         self.engine = engine
@@ -259,12 +264,12 @@ class HubApi:
 
         This takes the interface down and up — a few hundred milliseconds without a bus
         — which is why it is asked for and never done by looking (makiety, A3). A socket
-        the hub has on it stays bound through the bounce. A bus left out at start does
-        not join the running hub by this: it takes a restart.
+        the hub has on it stays bound through the bounce. The watch is told first: a bus
+        the hub takes down itself is a planned break, not a failure (zadania/zrobione/BUG-04.md).
         """
         entries, _, _ = self._ask(self._bus_entries)
         bus = self._bus_entry(entries, kind, name)
-        with self._applying:
+        with self._applying, self._planned(bus.channel):
             driver = self.drivers(bus)
             try:
                 driver.open()
@@ -984,9 +989,18 @@ class HubApi:
             },
         )
 
+    def _planned(self, channel: str) -> AbstractContextManager[None]:
+        return self.watch.planned(channel) if self.watch is not None else nullcontext()
+
+    def _link(self, channel: str) -> tuple[str, str]:
+        """The watch's word on a bus — empty for one it does not watch."""
+        state = self.watch.state(channel) if self.watch is not None else None
+        return (state.link.value, state.fault) if state is not None else ("", "")
+
     def _bus(self, index: int, name: str) -> BusView:
         reading = self.core.meter.reading(index)
         bitrate = _bitrate(self.core.config, name)
+        link, fault = self._link(name)
         return BusView(
             index=index,
             name=name,
@@ -997,6 +1011,8 @@ class HubApi:
             tx_rate=reading.tx_rate,
             bitrate=bitrate,
             load=reading.bits_rate / bitrate if bitrate else None,
+            link=link,
+            fault=fault,
         )
 
     def _config(self, inst: Installation) -> ConfigView:
@@ -1089,6 +1105,8 @@ class HubApi:
             bitrate=bus.bitrate,
             open=bus.channel in open_channels,
             nodes=counts.get(bus.channel, 0),
+            link=self._link(bus.channel)[0],
+            fault=self._link(bus.channel)[1],
         )
         driver = self.drivers(bus)
         try:
@@ -1291,6 +1309,11 @@ class HubApi:
         Reads included: the model belongs to CORE and reaching into it from the side is
         a mistake, however briefly it may look like it works.
         """
+        if self.core.ident is not None and not self.core.is_alive():
+            # Started and gone: nobody reads the queue, so waiting out the timeout would
+            # only hide why (zadania/zrobione/BUG-04.md). Tests drive CORE with pump() and never
+            # start it — for them `ident` stays None.
+            raise ApiError(Problem.TIMEOUT, "the hub's CORE thread has stopped — restart the hub")
         future: Future[T] = Future()
 
         def task() -> None:

@@ -32,11 +32,16 @@ class Bus(Protocol):
         ...
 
     def recv(self) -> Frame | None:
-        """One frame, or ``None`` when nothing is waiting. It never blocks."""
+        """One frame, or ``None`` when nothing is waiting. It never blocks.
+
+        ``OSError`` when the bus failed (``ENETDOWN`` once as the interface goes down,
+        ``ENODEV`` when it disappears) — RX counts it and moves on to the other buses."""
         ...
 
     def send(self, frame: Frame) -> None:
-        """Send a frame. Raises ``TransmitQueueFull`` when the kernel will not take it."""
+        """Send a frame. Raises ``TransmitQueueFull`` when the kernel will not take it,
+        and another ``OSError`` when the bus is not there to take it (``ENETDOWN`` while
+        the interface is down) — the hub counts both as a frame that did not go out."""
         ...
 
     def close(self) -> None: ...

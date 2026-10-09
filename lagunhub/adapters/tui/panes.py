@@ -235,7 +235,7 @@ def _buses(state: State) -> Pane:
                     str(b.nodes),
                     _bus_state(b),
                 ),
-                GOOD if b.state == "ok" and b.open else BAD,
+                GOOD if b.state == "ok" and b.open and b.link in ("", "up") else BAD,
             )
             for b in state.snapshot.buses
         ),
@@ -245,6 +245,9 @@ def _buses(state: State) -> Pane:
 
 
 def _bus_state(bus: BusSetupView) -> str:
+    # The running hub's word first: a bus that failed is that, whatever its plan says.
+    if bus.link in _LINK_ALARM:
+        return _LINK_ALARM[bus.link]
     if bus.state == "ok":
         return "✓"
     if bus.state == "error":
@@ -252,6 +255,11 @@ def _bus_state(bus: BusSetupView) -> str:
     automatic = sum(1 for change in bus.changes if not change.manual)
     by_hand = len(bus.changes) - automatic
     return f"DRIFT {automatic}" if automatic else f"BY HAND {by_hand}"
+
+
+_LINK_ALARM: Final = {"failure": "FAILURE", "gave-up": "GAVE UP", "planned": "APPLYING"}
+"""The watch's states worth a word in a list (zadania/zrobione/BUG-04.md); `up` and a bus not
+watched say nothing."""
 
 
 _LISTS: Final[dict[Section, Callable[[State], Pane]]] = {
@@ -429,6 +437,8 @@ def _bus_detail(state: State) -> Pane:
     if bus.state == "error":
         return Pane(title=title, note=(bus.error, "", "The hub could not even look at it."))
     prose: list[str] = []
+    if bus.fault:
+        prose += [bus.fault, ""]
     if not bus.open:
         prose += ["The hub did not open this bus at start — see Issues; it takes a restart.", ""]
     if bus.changes:
@@ -489,9 +499,10 @@ def _bus_line(bus: BusView, width: int) -> str:
     (`core/busload.py`). Without a bitrate there is a dash, never a guessed percentage.
     """
     load = f"≈{bus.load * 100:.1f} %" if bus.load is not None else MISSING
+    alarm = f"  {_LINK_ALARM[bus.link]}" if bus.link in _LINK_ALARM else ""
     return (
         f"{bus.name:<{width}}  rx {bus.rx_rate:.1f}/s  tx {bus.tx_rate:.1f}/s  {load}  "
-        f"(rx {bus.rx} · tx {bus.tx} · dropped {bus.dropped})"
+        f"(rx {bus.rx} · tx {bus.tx} · dropped {bus.dropped}){alarm}"
     )
 
 

@@ -6,6 +6,15 @@ and forgets about.
 
 The queue is filled with ``put_nowait``, never ``put``: a full queue means the consumer
 has stalled, and RX has no right to stall with it.
+
+**A failing bus does not end the thread** (zadania/zrobione/BUG-04.md). An interface going
+``down`` fails ``recv`` once with ``ENETDOWN`` — the kernel parks the error on the
+socket and wakes ``select`` with it — and one that disappears fails it with ``ENODEV``.
+Before, that error left ``run`` and the hub went on deaf to every bus, with the API and
+the view looking normal. Now it is counted against that bus and the other buses go on;
+after ``up`` the same socket receives again, since CAN_RAW is bound to the interface's
+index and not to its state. Only ``OSError`` is caught: a bug in the binding engine is
+to surface, not be swallowed.
 """
 
 from __future__ import annotations
@@ -82,6 +91,8 @@ class RxThread(threading.Thread):
         """Received frames per bus — counted here, before the slow queue that may
         overflow (`core/busload.py`)."""
         self.overflowed = 0
+        self.errors = [0] * len(self.buses)
+        """Failed receptions per bus — the interface went down or away."""
         self._stop = threading.Event()
 
     def pump(self) -> int:
@@ -90,11 +101,18 @@ class RxThread(threading.Thread):
         That way there is not a single sleep() in them, and the order of events is
         exactly what the test sets.
         """
+        return sum(self._drain(index) for index in range(len(self.buses)))
+
+    def _drain(self, index: int) -> int:
+        """Everything waiting on one bus. Its error ends the draining, not the thread."""
+        bus = self.buses[index]
         handled = 0
-        for index, bus in enumerate(self.buses):
+        try:
             while (frame := bus.recv()) is not None:
                 self._dispatch(index, frame)
                 handled += 1
+        except OSError:
+            self.errors[index] += 1
         return handled
 
     def _dispatch(self, index: int, frame: Frame) -> None:
@@ -112,16 +130,35 @@ class RxThread(threading.Thread):
 
     def run(self) -> None:
         selector = selectors.DefaultSelector()
-        for index, bus in enumerate(self.buses):
-            selector.register(bus, selectors.EVENT_READ, index)
+        registered: dict[int, int] = {}
         try:
             while not self._stop.is_set():
+                self._register(selector, registered)
                 for key, _ in selector.select(timeout=0.2):
-                    bus = self.buses[key.data]
-                    while (frame := bus.recv()) is not None:
-                        self._dispatch(key.data, frame)
+                    self._drain(key.data)
         finally:
             selector.close()
+
+    def _register(self, selector: selectors.BaseSelector, registered: dict[int, int]) -> None:
+        """Keep ``select`` on each bus's **current** descriptor.
+
+        A SocketCAN bus replaces its socket when its interface comes back
+        (`SocketCanBus.reopen`, zadania/zrobione/BUG-04.md) — so the descriptor is registered by
+        number and checked on every turn; the turn is at most 0.2 s, and a new socket
+        is not missing frames meanwhile, the kernel queues them. By number and not by the
+        bus object: a selector finds an object's key through its *current* `fileno()`,
+        which after a swap is not the one it holds.
+        """
+        for index, bus in enumerate(self.buses):
+            fd = bus.fileno()
+            old = registered.get(index)
+            if old == fd:
+                continue
+            if old is not None:
+                # Closed already by the swap; the selector drops it without complaint.
+                selector.unregister(old)
+            selector.register(fd, selectors.EVENT_READ, index)
+            registered[index] = fd
 
     def stop(self) -> None:
         self._stop.set()

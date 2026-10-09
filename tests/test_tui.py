@@ -263,6 +263,11 @@ class TestHealthDetail:
         assert "%" not in udp
         assert panes.MISSING in udp
 
+    def test_a_bus_the_hub_gave_up_on_says_so(self, state: State) -> None:
+        lines = self.health(state, BusView(0, "can0", link="gave-up"), BusView(1, "can1"))
+        assert next(line for line in lines if line.startswith("can0")).endswith("GAVE UP")
+        assert not next(line for line in lines if line.startswith("can1")).endswith("UP")
+
     def test_no_bus_says_so(self, state: State) -> None:
         lines = self.health(state)
         assert f"buses: {panes.MISSING}" in lines
@@ -1001,6 +1006,17 @@ class TestBuses:
         (row,) = panes.items(state).rows
         assert row.cells[-1] == "ERROR"
         assert "no /sys/class/net: this is not Linux" in panes.details(state).note
+
+    def test_a_failed_link_outranks_the_plan(self, state: State) -> None:
+        """The running hub's word on a bus first (zadania/zrobione/BUG-04.md)."""
+        self.buses(state)
+        fault = "bus ground-floor (can0) failed — it is down, and not by the hub"
+        bus = replace(state.snapshot.buses[0], state="ok", changes=(), link="failure", fault=fault)
+        state.snapshot = replace(state.snapshot, buses=(bus,))
+        (row,) = panes.items(state).rows
+        assert row.cells[-1] == "FAILURE"
+        assert row.colour == panes.BAD
+        assert panes.details(state).note[0] == fault
 
     def test_u_reconciles_only_after_the_name_is_retyped(self, state: State) -> None:
         """Reconciling takes the bus down for a moment — the weight of a factory reset."""

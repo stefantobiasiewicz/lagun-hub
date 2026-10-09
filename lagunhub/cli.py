@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import queue
 import shutil
@@ -19,6 +20,7 @@ from lagunhub.adapters.client.client import TOKEN_ENV
 from lagunhub.adapters.http import HubServer
 from lagunhub.adapters.http.auth import TOKEN_FILE, TokenError
 from lagunhub.api import ApiError, HubApi
+from lagunhub.buswatch import BusWatch
 from lagunhub.core.bindings import BindingEngine
 from lagunhub.core.config import (
     CONFIG_ENV,
@@ -104,6 +106,7 @@ def _serve(
     feed: bool | None = None,
     accept_new: bool = False,
     config: Config | None = None,
+    watch: BusWatch | None = None,
 ) -> int:
     """Start the hub and show the traffic. The threads work alongside and do not wait for
     the printing.
@@ -155,12 +158,15 @@ def _serve(
 
     rx.start()
     core.start()
+    if watch is not None:
+        watch.report = lambda line: _report(core, line)
+        watch.start()
     if accept_new:
         # On the CORE thread, like every change to the model. It expires by itself,
         # as when opened from the full-screen view.
         core.submit(core.commissioning.accept_new)
         print("accepting new nodes — the mode closes by itself after 15 min", flush=True)
-    server = _start_api(core, engine, api_config, where)
+    server = _start_api(core, engine, api_config, where, watch)
 
     # `Ctrl-C` is SIGINT, but `kill` from a second terminal and closing a `tmux` session
     # are SIGTERM. Without this the hub dies halfway through a write to SQLite, and at
@@ -171,12 +177,16 @@ def _serve(
 
     started = time.monotonic()
     recent = started
+    reported: set[str] = set()
     try:
         while not stop.is_set():
             try:
                 item = display.get(timeout=0.5)
             except queue.Empty:
                 item = None
+            threads = (rx, core) if watch is None else (rx, core, watch)
+            for line in _dead_threads(threads, reported, core):
+                print(line, file=sys.stderr, flush=True)
             if item is not None and feed:
                 marker = "→" if isinstance(item, Sent) else " "
                 line = format_frame(item.frame, time.monotonic() - started, buses[item.bus].name)
@@ -190,6 +200,8 @@ def _serve(
         print("stopping…", flush=True)
         if server is not None:
             server.stop()
+        if watch is not None:
+            watch.stop()
         rx.stop()
         core.stop()
         if installation.bindings:
@@ -263,17 +275,57 @@ def _tui(config: Path, url: str | None, token: str | None) -> int:
     return tui_run(conn)
 
 
+def _dead_threads(
+    threads: tuple[threading.Thread, ...], reported: set[str], core: CoreThread
+) -> list[str]:
+    """A hub thread that ended while the hub runs — said once per thread.
+
+    RX and CORE are not to end on a failing bus any more (zadania/zrobione/BUG-04.md), but one
+    that ends for another reason used to leave the hub deaf or frozen with nothing but a
+    traceback in the console. The line goes to stderr and into the issues, where the
+    view and `health` show it — through CORE's queue, like every change to the model;
+    with CORE itself gone nobody reads it, which is harmless (`submit` never blocks).
+    The watch over the buses is one of them: a hub that stopped watching would not
+    bring a failed bus back, and would not say so either.
+    """
+    lines: list[str] = []
+    for thread in threads:
+        if thread.name in reported or thread.ident is None or thread.is_alive():
+            continue
+        reported.add(thread.name)
+        line = f"the hub's {thread.name.upper()} thread has stopped — restart the hub"
+        lines.append(line)
+        _issue(core, line)
+    return lines
+
+
+def _issue(core: CoreThread, line: str) -> None:
+    """Into the issues, on CORE — the model is CORE's."""
+
+    def note() -> None:
+        core.installation.issues.append(line)
+
+    core.submit(note)
+
+
+def _report(core: CoreThread, line: str) -> None:
+    """What the watch over the buses has to say: the console and the issues."""
+    print(f"!! {line}", file=sys.stderr, flush=True)
+    _issue(core, line)
+
+
 def _start_api(
     core: CoreThread,
     engine: BindingEngine,
     config: ApiConfig | None,
     where: Path | None,
+    watch: BusWatch | None = None,
 ) -> HubServer | None:
     """The server is **on by default**, because without it the hub has no way of being
     operated."""
     if config is None or not config.enabled:
         return None
-    api = HubApi(core, engine=engine)
+    api = HubApi(core, engine=engine, watch=watch)
     try:
         server = HubServer(
             api,
@@ -324,23 +376,52 @@ def _bus_configs(config: Config, channels: list[str] | None) -> list[BusConfig]:
     ]
 
 
-def _bring_up_buses(configs: list[BusConfig]) -> tuple[list[Bus], list[str]]:
+def _bring_up_buses(
+    configs: list[BusConfig],
+) -> tuple[list[Bus], list[str], BusWatch | None]:
     """Set every SocketCAN interface up as the file says, then open the sockets
     (zadania/FEAT-01.md, R3). What the hub cannot do itself comes back as issues and the
     hub starts anyway — `lagunhub/buses.py` says why. Without SocketCAN on this machine
     there is nothing to set up, and opening raises `RuntimeError` with its own sentence.
+
+    Every bus that opened goes under the watch (`lagunhub/buswatch.py`), which carries
+    on where the start left off: a bus the start could not bring up is a failure the
+    hub keeps mending (zadania/zrobione/BUG-04.md, S). An interface the kernel does not have yet
+    still opens — unbound, `missing_ok` — so the watch can open it when it comes.
     """
     issues: list[str] = []
+    outcomes: dict[str, buses.Outcome] = {}
     if HAS_SOCKETCAN:
         for config in configs:
             outcome = buses.bring_up(config, SocketCanDriver(config.channel))
+            outcomes[config.channel] = outcome
             print(outcome.line(), flush=True)
             if outcome.issue:
                 issues.append(outcome.issue)
-    opened, left_out = buses.open_buses(configs, lambda bus: SocketCanBus(bus.channel))
+    opened, left_out = buses.open_buses(
+        configs, lambda bus: SocketCanBus(bus.channel, missing_ok=True)
+    )
     for issue in left_out:
         print(f"!! {issue}", flush=True)
-    return opened, issues + left_out
+    watch = BusWatch()
+    by_channel = {config.channel: config for config in configs}
+    watched = [bus for bus in opened if isinstance(bus, SocketCanBus)]
+    for bus in watched:
+        if bus.channel in by_channel:
+            config = by_channel[bus.channel]
+            watch.add(
+                config.name,
+                config.channel,
+                bus,
+                functools.partial(_bring_up, config),
+                outcomes.get(config.channel),
+            )
+    return opened, issues + left_out, (watch if watched else None)
+
+
+def _bring_up(config: BusConfig) -> buses.Outcome:
+    """The watch's repair: what the start does, with a fresh driver each time."""
+    return buses.bring_up(config, SocketCanDriver(config.channel))
 
 
 def _ephemeral_config(source: Path | None) -> tuple[tempfile.TemporaryDirectory[str], Path]:
@@ -489,6 +570,7 @@ def _run(args: argparse.Namespace, where: Path) -> int:
         return 2
 
     issues: list[str] = []
+    watch: BusWatch | None = None
     try:
         if args.udp:
             opened = _open_buses([], args.udp)
@@ -498,7 +580,7 @@ def _run(args: argparse.Namespace, where: Path) -> int:
                 flush=True,
             )
         else:
-            opened, issues = _bring_up_buses(_bus_configs(config, args.bus))
+            opened, issues, watch = _bring_up_buses(_bus_configs(config, args.bus))
     except (ValueError, OSError, RuntimeError) as exc:
         hint = "" if args.udp else " — without CAN on this machine, try --udp"
         print(f"cannot open the bus: {exc}{hint}", file=sys.stderr)
@@ -521,6 +603,7 @@ def _run(args: argparse.Namespace, where: Path) -> int:
         args.feed,
         accept_new=config.accept_new or args.accept_new,
         config=config,
+        watch=watch,
     )
 
 

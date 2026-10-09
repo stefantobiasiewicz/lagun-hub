@@ -199,6 +199,10 @@ class BusSetupView:
     person can; `error` — the driver could not even look (`error` says why)."""
     changes: tuple[ChangeView, ...] = ()
     error: str = ""
+    link: str = ""
+    """As `BusView.link` — the running hub's word, apart from the plan above, which is
+    the hardware's against the file."""
+    fault: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +231,14 @@ class BusView:
     load: float | None = None
     """The share of wire time taken, 0..1 — an **estimate from above** (worst-case bit
     stuffing), so shown as `≈`. `None` without a bitrate."""
+
+    link: str = ""
+    """The watch's word on the link (zadania/zrobione/BUG-04.md): `up`, `planned` (the hub took
+    it down itself, reconfiguring), `failure` (down, not by the hub — being brought up),
+    `gave-up` (the hub stopped trying, `fault` says why). Empty for a bus not watched —
+    anything but SocketCAN."""
+
+    fault: str = ""
 
 
 @dataclass(frozen=True, slots=True)

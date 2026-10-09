@@ -11,6 +11,7 @@ in an adapter, and by then it is too late:
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import asdict
@@ -20,11 +21,12 @@ from typing import Any
 import pytest
 
 from lagunhub.api import ApiError, HubApi, Problem
+from lagunhub.buswatch import BusWatch, Link, LinkState
 from lagunhub.core.config import load
 from lagunhub.core.config.apply import apply
 from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.model import Uid
-from lagunhub.drivers.base import Rejected, Unreachable
+from lagunhub.drivers.base import Change, Rejected, Unreachable
 from lagunhub.drivers.socketcan import SocketCanSettings
 from lagunhub.protocol.endpoints import key_input as ki
 from lagunhub.protocol.endpoints import output as out
@@ -35,6 +37,7 @@ from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
 from tests.node.node import NodeCore
 from tests.test_buses import BITRATE, LINK, MISSING, FakeDriver
+from tests.test_buswatch import Kernel, Repair, Socket
 from tests.test_enumeration import Rig, joined
 
 SWITCH_UID = bytes(range(8))
@@ -570,7 +573,7 @@ bindings: []
 """
 
     @staticmethod
-    def api(hub: Hub, drivers: dict[str, FakeDriver]) -> HubApi:
+    def api(hub: Hub, drivers: dict[str, FakeDriver], watch: BusWatch | None = None) -> HubApi:
         hub.path.write_text(TestBuses.BUSES, encoding="utf-8")
         config = load(hub.path)
         hub.inst.core.submit(lambda: hub.inst.core.apply_config(config))
@@ -580,7 +583,51 @@ bindings: []
             timeout=2.0,
             wait=hub._wait,
             drivers=lambda bus: drivers[bus.channel],
+            watch=watch,
         )
+
+    @staticmethod
+    def watch(kernel: Kernel) -> BusWatch:
+        """A watch over the open bus `hub`, its interface held by `kernel`."""
+        watch = BusWatch(probe=lambda channel: kernel.look("can0"), report=lambda line: None)
+        watch.add("ground-floor", "hub", Socket(kernel), Repair(kernel))
+        return watch
+
+    def test_apply_is_a_planned_break(self, hub: Hub) -> None:
+        """The hub takes the bus down itself: the watch is told, nothing is a failure
+        (zadania/zrobione/BUG-04.md, P)."""
+        kernel = Kernel()
+        watch = self.watch(kernel)
+        seen: list[str] = []
+
+        class Bouncing(FakeDriver):
+            def apply(self, changes: Sequence[Change]) -> None:
+                kernel.up = False
+                watch.tick()
+                seen.append(str(watch.state("hub")))
+                kernel.up = True
+                super().apply(changes)
+
+        api = self.api(hub, {"hub": Bouncing([BITRATE]), "can1": FakeDriver()}, watch)
+        api.bus_apply("socketcan", "ground-floor")
+        watch.tick()
+
+        assert seen == [str(LinkState(Link.PLANNED))]
+        assert watch.state("hub") == LinkState(Link.UP)
+
+    def test_a_failed_link_is_in_health_and_in_the_buses(self, hub: Hub) -> None:
+        kernel = Kernel()
+        watch = self.watch(kernel)
+        api = self.api(hub, {"hub": FakeDriver(), "can1": FakeDriver()}, watch)
+        kernel.up = False
+        watch.tick()
+
+        (bus,) = api.health().buses
+        assert (bus.name, bus.link) == ("hub", "failure")
+        assert "not by the hub" in bus.fault
+        ground, first = api.buses()
+        assert (ground.link, ground.fault) == ("failure", bus.fault)
+        assert (first.link, first.fault) == ("", ""), "not watched — left out at start"
 
     def test_every_bus_from_the_file_is_listed(self, hub: Hub, relay: NodeCore) -> None:
         api = self.api(hub, {"hub": FakeDriver(), "can1": FakeDriver()})

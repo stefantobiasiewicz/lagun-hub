@@ -42,7 +42,7 @@ from lagunhub.core.store import StoreThread
 from lagunhub.core.strangers import Strangers
 from lagunhub.core.traffic import Traffic, TrafficBus
 from lagunhub.core.transactions import Outcome, TidAllocator, TransactionManager
-from lagunhub.protocol.bus.base import Bus, TransmitQueueFull
+from lagunhub.protocol.bus.base import Bus
 from lagunhub.protocol.endpoints import device as dev
 from lagunhub.protocol.frame import Frame, decode_header
 from lagunhub.protocol.registry import TRANSACTIONAL, MessageKind, ResultCode
@@ -174,9 +174,12 @@ class CoreThread(threading.Thread):
             self.buses[bus].send(frame)
         except IndexError:
             self.dropped_sends += 1  # no such bus — nowhere to count it either
-        except TransmitQueueFull:
-            # Send queue full: we hand the request to our own timer, because a retry
-            # is part of the transaction anyway (ARCHITEKTURA.md §7.1).
+        except OSError:
+            # Send queue full (`TransmitQueueFull`) or the bus down (`ENETDOWN`,
+            # zadania/zrobione/BUG-04.md): we hand the request to our own timer, because a retry
+            # is part of the transaction anyway (ARCHITEKTURA.md §7.1). An uncaught
+            # error here used to end the CORE thread — and the API with it, which waits
+            # on CORE's queue.
             self.dropped_sends += 1
             self.counts.drop(bus)
         else:

@@ -20,7 +20,7 @@ from lagunhub.core.busload import BusCounts
 from lagunhub.core.metrics import Latency
 from lagunhub.core.model import Snapshot
 from lagunhub.core.transactions import TidAllocator
-from lagunhub.protocol.bus.base import Bus, TransmitQueueFull
+from lagunhub.protocol.bus.base import Bus
 from lagunhub.protocol.frame import (
     ELEMENT_MASK,
     ENDPOINT_MASK,
@@ -107,8 +107,12 @@ class BindingEngine:
                 self.counts.count(target.bus, sent_one)
                 if self.on_sent is not None:
                     self.on_sent(target.bus, sent_one)
-            except TransmitQueueFull:
-                # A late command is worse than a missing one — we do not retry.
+            except OSError:
+                # A full send queue (`TransmitQueueFull`) or a bus that is down
+                # (`ENETDOWN`, zadania/zrobione/BUG-04.md) — either way the command did not go
+                # out, and a late command is worse than a missing one: we do not retry.
+                # Caught here and not in RX, which would count it against the bus the
+                # event came from and skip the event's slow path.
                 self.dropped += 1
                 self.counts.drop(target.bus)
 

@@ -48,6 +48,9 @@ class Outcome:
     issue: str = ""
     """Empty when the bus is as the file says. Otherwise one sentence for the issue
     list — what is wrong and what to do about it."""
+    hopeless: bool = False
+    """Trying again will not help: sudo asked for a password. The watch over the buses
+    gives up at once instead of spending its attempts (zadania/zrobione/BUG-04.md, D1)."""
 
     def line(self) -> str:
         """One line for the console."""
@@ -80,7 +83,8 @@ def bring_up(bus: BusConfig, driver: Driver) -> Outcome:
         if automatic:
             driver.apply(automatic)
     except Rejected as exc:
-        return Outcome(bus, issue=f"{label}: {exc}{sudo_hint(exc)}")
+        hint = sudo_hint(exc)
+        return Outcome(bus, issue=f"{label}: {exc}{hint}", hopeless=bool(hint))
     except (DriverError, ValueError) as exc:
         return Outcome(bus, issue=f"{label}: {exc}")
     if by_hand:
