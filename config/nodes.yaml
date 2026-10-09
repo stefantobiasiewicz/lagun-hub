@@ -5,9 +5,10 @@
 # as if the hub knew "that is kitchen-relay" — while all it knows is that somebody
 # named THIS Uid that way.
 #
-# There are no addresses here and there will not be: an address is a route, not an
-# identity. The hub learns it at joining and keeps it in its database
-# (KONFIGURACJA.md §11).
+# Nothing is keyed by address: an address is a route, not an identity. The address a
+# node got at joining is written here BY THE HUB, as one line in the node's entry —
+#   joined: {address: 0x012, bus: ground-floor, short_id: 0x5A1B2C3D}
+# — so that after a restart the hub talks to the node at once (KONFIGURACJA.md §4.3).
 
 nodes:
   "0001020304050607":

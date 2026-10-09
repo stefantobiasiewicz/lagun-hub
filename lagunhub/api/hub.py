@@ -463,7 +463,7 @@ class HubApi:
             pending = self.core.readout.start(node, endpoint)
             return ReadoutView(started=pending > 0, pending=pending, running=len(self.core.readout))
 
-        return self._ask(order)
+        return self._ask_described(ref, order)
 
     def block(self, ref: str) -> ConfigView:
         """Tell the hub not to serve this node (06-cykl-zycia-urzadzenia.md §8).
@@ -511,7 +511,7 @@ class HubApi:
                 )
             return node, meta.id, self._args(meta.args, args or {}, model)
 
-        return self._act(assemble, endpoint, MessageKind.COMMAND)
+        return self._act(ref, assemble, endpoint, MessageKind.COMMAND)
 
     def write(self, ref: str, endpoint: int, attribute: str, value: Any) -> ActionView:
         """A working setting. **This is not configuration** — configuration goes to the
@@ -527,7 +527,7 @@ class HubApi:
             self._exposed(model, meta, coerce(meta, value), ref, endpoint)
             return node, meta.id, encoded
 
-        return self._act(assemble, endpoint, MessageKind.WRITE)
+        return self._act(ref, assemble, endpoint, MessageKind.WRITE)
 
     def read(self, ref: str, endpoint: int, attribute: str) -> ActionView:
         """A read **from the node**, not from the hub’s memory. `node()` serves the
@@ -543,7 +543,7 @@ class HubApi:
             self._exposed(model, meta, None, ref, endpoint)
             return node, meta.id, b""
 
-        return self._act(assemble, endpoint, MessageKind.READ)
+        return self._act(ref, assemble, endpoint, MessageKind.READ)
 
     def identify(self, ref: str, seconds: int = 5) -> ActionView:
         """Which of those forty boxes. The only operation nothing else can replace while
@@ -553,7 +553,7 @@ class HubApi:
             node = self._present(inst, ref)
             return node, dev.IDENTIFY, encode("u16", seconds)
 
-        return self._act(assemble, 0, MessageKind.COMMAND)
+        return self._act(ref, assemble, 0, MessageKind.COMMAND)
 
     # --- configuration -----------------------------------------------------------
 
@@ -594,7 +594,7 @@ class HubApi:
             started_now = self.core.reconcile.start(node)
             return ReconcileView(started=started_now, running=len(self.core.reconcile))
 
-        return self._ask(order)
+        return self._ask_described(ref, order)
 
     def config_set_attribute(
         self, ref: str, endpoint: int, attribute: str, value: Any, *, etag: str
@@ -1329,6 +1329,7 @@ class HubApi:
 
     def _act(
         self,
+        ref: str,
         build: Callable[[Installation], tuple[NodeModel, int, bytes]],
         endpoint: int,
         kind: MessageKind,
@@ -1336,9 +1337,7 @@ class HubApi:
         """A transaction: CORE assembles the request and the reply comes back the same way."""
         future: Future[Outcome] = Future()
 
-        def task() -> None:
-            if not future.set_running_or_notify_cancel():
-                return
+        def send() -> None:
             try:
                 node, element, args = build(self.core.installation)
             except BaseException as exc:
@@ -1353,8 +1352,63 @@ class HubApi:
                 on_done=future.set_result,
             )
 
+        def task() -> None:
+            if future.set_running_or_notify_cancel():
+                self._described(ref, send, future.set_exception)
+
         self.core.submit(task)
         return _outcome(self._collect(future))
+
+    def _ask_described[T](self, ref: str, build: Callable[[Installation], T]) -> T:
+        """`_ask`, for an operation that needs the node's endpoints — run once they are
+        read."""
+        future: Future[T] = Future()
+
+        def run() -> None:
+            try:
+                future.set_result(build(self.core.installation))
+            except BaseException as exc:
+                future.set_exception(exc)
+
+        def task() -> None:
+            if future.set_running_or_notify_cancel():
+                self._described(ref, run, future.set_exception)
+
+        self.core.submit(task)
+        return self._collect(future)
+
+    def _described(
+        self, ref: str, run: Callable[[], None], fail: Callable[[BaseException], None]
+    ) -> None:
+        """From CORE: `run`, once the hub has read what this node is.
+
+        A node taken from the file after a restart is reachable at once, but its
+        endpoints are read only at its first frame (zadania/BUG-05.md, N9). An operation
+        that comes first does not stop at "the hub does not know this endpoint yet" —
+        it reads the descriptor, one node, and goes on. A node the hub cannot reach is
+        `run`'s business: whatever it raises is the right answer.
+        """
+        try:
+            node = self._present(self.core.installation, ref)
+        except ApiError:
+            run()
+            return
+        if node.described:
+            run()
+            return
+
+        def done(ready: bool) -> None:
+            if ready:
+                run()
+            else:
+                fail(
+                    ApiError(
+                        Problem.SILENT,
+                        f"{ref}: reading what the node is failed — it did not answer",
+                    )
+                )
+
+        self.core.describe(node, done)
 
     def _collect[T](self, future: Future[T]) -> T:
         try:

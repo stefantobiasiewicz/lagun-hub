@@ -48,9 +48,10 @@ api:
 """
 
 NODES: Final = """\
-# Nodes — the key is the Uid, because that is what identity is. There are no addresses
-# here and there will not be: an address is a route, not an identity, and the hub
-# assigns it itself at joining.
+# Nodes — the key is the Uid, because that is what identity is. Nothing is keyed by
+# address: an address is a route, not an identity, and the hub assigns it itself at
+# joining — then writes it here as `joined: {address, bus, short_id}`, so that it still
+# knows where each node sits after a restart. That line is the hub's; leave it be.
 #
 # This file fills itself. When a new node enters the installation, give it a name and an
 # alias from the view (`lagun-hub tui`, keys [n] and [N]) — they will land here.

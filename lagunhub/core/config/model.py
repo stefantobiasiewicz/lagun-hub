@@ -4,9 +4,12 @@ The installation model is read from the nodes and rebuilds itself within one
 `ReportInterval`. **Human decisions never rebuild**: names, bindings, the meaning of
 groups, the sources of inputs ([`KONFIGURACJA.md`](../../KONFIGURACJA.md) §1).
 
-There are no addresses here and there will not be. An address is a route, not an
-identity — a configuration written "to address `0x2A`" falls apart at the first
-renumbering.
+Nothing here is **keyed** by address, and nothing will be. An address is a route, not
+an identity — a configuration written "to address `0x2A`" falls apart at the first
+renumbering. The address a node holds is still **written down**, as a field of its
+entry (`JoinedConfig`): the hub assigned it, and a hub that forgets it after a restart
+can neither reach a silent node nor keep its address from somebody else
+(zadania/BUG-05.md).
 """
 
 from __future__ import annotations
@@ -89,6 +92,33 @@ class EndpointConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class JoinedConfig:
+    """Where a joined node sits — **written by the hub**, not by a person.
+
+    The only thing in the files that is not a human decision. It is here rather than in
+    a database because it is the only part of the installation model that cannot be
+    read back from the bus at will: the hub assigned the address, a silent node will not
+    say it, and an address forgotten while its node is switched off would be handed to
+    another one (lagunbus-spec/07-hub.md §5; zadania/BUG-05.md, D1). Everything else the
+    model holds — the descriptor, the firmware — enumeration reads again, once, at the
+    node's first frame.
+
+    One field holding all three, so that it is plain which part of an entry belongs to
+    the hub: a person edits the rest.
+    """
+
+    address: int
+    bus: str
+    """The **name** of the bus in `hub.yaml` — `ground-floor`, not an index that changes
+    when a bus is added, nor a channel that changes when the hardware does."""
+
+    short_id: int
+    """So that a node back from a factory reset — which announces nothing but its
+    `ShortId` — gets its address back without the accepting mode
+    (06-cykl-zycia-urzadzenia.md §7)."""
+
+
+@dataclass(frozen=True, slots=True)
 class NodeConfig:
     alias: str
     uid: Uid
@@ -98,9 +128,12 @@ class NodeConfig:
     blocked: bool = False
     """The hub knows this node and does not serve it (06-cykl-zycia-urzadzenia.md §8).
 
-    A decision about the installation, so it lives here, next to the name — and not in
-    the database, which does not survive a restart yet and would key it by an address
-    that changes."""
+    A decision about the installation, so it lives here, next to the name — keyed by
+    `Uid`, which never changes, unlike the address."""
+
+    joined: JoinedConfig | None = None
+    """Set by the hub once the node is enumerated. `None` — a node planned, not joined
+    yet, or one the hub has not written down."""
 
 
 @dataclass(frozen=True, slots=True)

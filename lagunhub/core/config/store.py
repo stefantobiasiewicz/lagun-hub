@@ -34,6 +34,8 @@ from pathlib import Path
 from typing import Any, Final
 
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.scalarint import HexCapsInt
 
 from lagunhub.core.config.loader import FILES, ConfigError, from_document
 from lagunhub.core.config.model import Config
@@ -178,6 +180,31 @@ class ConfigStore:
         self._etag = self.digest()
         return config
 
+    def set_joined(self, uid: bytes, address: int, bus: str, short_id: int) -> Config | None:
+        """Write where a node sits — `joined` in its entry, created when the file has no
+        entry for it (zadania/BUG-05.md, N6). `None` when the file says so already.
+
+        The **current** digest, not one somebody saw: this is the hub's own field, written
+        because of something the bus said, with no stale view of the file to protect —
+        the same as `block`. Hexadecimal and on one line, because that is how a person
+        reads addresses, and so that the hub's part of an entry stands out from theirs.
+        """
+        key = bytes(uid).hex()
+        nodes = self.document().get("nodes") or {}
+        entry = next((v for k, v in nodes.items() if str(k).lower() == key), None)
+        written = entry.get("joined") if isinstance(entry, dict) else None
+        if isinstance(written, dict) and _same_joined(written, address, bus, short_id):
+            return None
+        value = CommentedMap(
+            [
+                ("address", HexCapsInt(address, width=3)),
+                ("bus", bus),
+                ("short_id", HexCapsInt(short_id, width=8)),
+            ]
+        )
+        value.fa.set_flow_style()
+        return self.set(("nodes", key, "joined"), value, etag=self.digest())
+
     def forget_node(self, uid: bytes, *, etag: str) -> tuple[Config, int]:
         """Remove a node's entry **and every binding it takes part in** — the file half
         of removing a node (06-cykl-zycia-urzadzenia.md §6). Returns the new
@@ -288,6 +315,17 @@ def _poke(document: dict[Any, Any], path: tuple[str, ...], value: Any, *, remove
         del place[last]
     else:
         place[last] = value
+
+
+def _same_joined(written: dict[Any, Any], address: int, bus: str, short_id: int) -> bool:
+    try:
+        return (
+            int(str(written.get("address")), 0) == address
+            and str(written.get("bus")) == bus
+            and int(str(written.get("short_id")), 0) == short_id
+        )
+    except ValueError:
+        return False  # a hand edit gone wrong — written over with what the bus says
 
 
 def _names(end: Any, names: set[str]) -> bool:

@@ -46,7 +46,7 @@ ma lądować wyłącznie hub (§12.2). The simulator run by hand is now a projec
 | Podział pracy | **ścieżka szybka / ścieżka wolna** | §3 — nie po to, żeby zmieścić się w mikrosekundach, tylko żeby nic wolnego nie zatrzymało klawisza |
 | Dostęp do modelu z RX | **niezmienny snapshot, copy-on-write** | prostsze niż lock i przy okazji szybsze |
 | Nadawanie | **każdy wątek nadaje sam, bez wątku TX** | `send()` pojedynczej ramki jest niepodzielny; wątek TX dokładałby kolejkę bez zysku |
-| Trwałość | **SQLite, zapis z opóźnieniem** | baza nigdy nie leży na ścieżce ramki |
+| Trwałość | **the configuration file** for what must survive a restart (`joined`, §8.6); SQLite with a delayed write is written (`core/store/`) and **not connected** | what the hub cannot read back from the bus is an address and a `ShortId` — they fit in the node's entry; the database waits for a reason of its own (`zadania/FEAT-07.md`) |
 | Adaptery | **klient w terminalu → REST → MQTT**, wszystkie nad jednym API rdzenia | §10.2 — pierwszy nie wymagał ani serwera, ani brokera; dziś w terminalu jest tylko widok pełnoekranowy, powłoki nie ma (§10.3) |
 | Serwer API | **biblioteka standardowa**, `ThreadingHTTPServer` (**H7**) | zero zależności na RPi; czy tak zostaje — `zadania/CR-03.md` |
 | API rdzenia | **pakiet `api/`: kontrakt osobno, implementacja ładowana leniwie** | klient chodzącego huba nie ładuje rdzenia; pilnuje `tests/test_boundaries.py` (§12) |
@@ -356,6 +356,11 @@ that divergence is closed.
 Model jest w **całości w pamięci**. Baza jest kopią zapasową i miejscem startu, nigdy
 źródłem odpowiedzi w czasie pracy.
 
+Today the starting point is the configuration file, not a database: each joined node's
+entry carries `joined` — address, bus, `ShortId` — and the model starts from those, with
+the descriptor read again at the node's first frame (§8.6). `core/store/` (SQLite) is
+written and tested but `lagun-hub run` does not open it (`zadania/FEAT-07.md`).
+
 ```
 Installation
  │
@@ -411,7 +416,7 @@ Pięć, plus wątek klienta MQTT, którym zarządza biblioteka.
 |---|---|---|---|
 | **RX** | `select()` nad socketami | dekodowanie, ścieżka szybka, rozdział reszty | jakiejkolwiek blokady poza magistralą |
 | **CORE** | `queue.get(timeout=…)` | model, transakcje, timery, enumeracja, przyłączanie, obecność | blokującego I/O — od tego są STORE i NORTH |
-| **STORE** | własna kolejka | zapis do SQLite z opóźnieniem | odpowiadania komukolwiek w czasie rzeczywistym |
+| **STORE** | własna kolejka | zapis do SQLite z opóźnieniem — **not started today** (§6) | odpowiadania komukolwiek w czasie rzeczywistym |
 | **ADAPTER** | gniazdo HTTP albo kolejka | tłumaczenie modelu na API / MQTT i komend z powrotem | dotykania modelu inaczej niż przez kolejkę CORE (§10.7) |
 | **BUSWATCH** | `Event.wait(1 s)` | looking at each SocketCAN interface, bringing a failed one back up (§9.3) | touching the model other than through CORE's queue; running `ip` on CORE's behalf |
 
@@ -526,6 +531,7 @@ any frame FROM a node (report, event, alarm, reply, query)
             Uid known       → issue: database and bus disagree
             ShortId known   → issue: the same, seen from the other key
             Uid blocked     → JoinRecord BLOCKED with that address (§8.4)
+            Uid in the file → JOINED, enumeration, READY, `joined` written    no operator
             otherwise       → JoinRecord PENDING with that address
                                  admit          → JOINED, enumeration, READY
                                  factory_reset  → the node forgets the address and joins anew
@@ -537,6 +543,11 @@ bring every stranger within five minutes, without polling (07-hub.md §5.1).
 
 **A pending node with an address is never admitted by itself**, not even with the
 accepting mode open — the mode is for nodes that announce, i.e. nodes without one.
+**A node whose `Uid` is in the file is not pending**: the entry is the operator's
+decision, made before, so it is enumerated straight away — the case of a file older than
+the bus, such as a backup or a node joined before the hub wrote addresses down
+(`zadania/BUG-05.md`, D4; `lagunbus-spec/DECYZJE.md`, "Węzeł z adresem, którego `Uid` hub
+ma w konfiguracji, wchodzi sam").
 
 **Heard addresses live in memory only.** After a restart every working node is heard again
 within one reporting period; an address of a node gone for good stays blocked until the
@@ -576,8 +587,8 @@ admitted again usually gets the same address. A forced removal that is acknowled
 frees it the same way; one never acknowledged keeps it blocked until the hub restarts, and
 the module, if it still works, comes back as `PENDING` (§8.3).
 
-**Blocking lives in the file**, keyed by `Uid`: it has to survive a restart, the hub does
-not keep its database yet, and an address changes when a node is admitted again. A
+**Blocking lives in the file**, keyed by `Uid`: it is an operator's decision, it has to
+survive a restart, and an address changes when a node is admitted again. A
 blocked node is recognised wherever its `Uid` is known — in a join record, after
 enumeration, or by `Strangers` after a restart — and then gets no address (accepting
 mode or not), is not enumerated, reconciled or controlled through the API, and keeps its
@@ -621,6 +632,47 @@ read_all(node)        Readout: one READ after another ── each reply → mode
 - **Stopped by** removing, blocking or enumerating the node — enumeration builds a new
   model, whoever started it (`Enumerator`'s `on_start`). Refused with `CONFLICT` while
   the node is being enumerated or already read; alongside reconciling it is allowed.
+
+### 8.6 After a restart
+
+Worked out in `zadania/BUG-05.md`. Before it a restart looked to the installation like a
+lost database: every node came back without an address, every operation ended at "the
+hub has not seen it yet", and a node that spoke waited as `PENDING`.
+
+```
+joining ends (enumeration READY)   →  nodes.yaml:  joined: {address, bus, short_id}
+                                        written only when it differs; ConfigStore.set_joined
+start, `apply`                     →  each entry with `joined`: NodeModel READY,
+                                        address reserved, join record under ShortId,
+                                        described = False — no frame, no polling
+first frame from such a node       →  enumeration → reconciling          (CoreThread._first_frame)
+an operation before that frame     →  enumeration of that node, then the operation  (HubApi._described)
+a factory-reset node announcing    →  its ShortId is known → its old address, no mode
+```
+
+- **In the file means joined.** Not "not heard since the start", not `ABSENT`, not polled:
+  bindings with the node as a target work from the first second (the snapshot needs an
+  address, nothing else), and so do commands. The rule is the user's: "if it is in
+  nodes, we know the device, it is joined, we talk to it directly".
+- **Why the file and not the database.** Of what the database would hold, only the
+  address and `ShortId` cannot be read back at will — the hub assigned the address, a
+  silent node does not say it, and an address forgotten while its node is off would go
+  to another node. The descriptor and firmware are read again at the first frame, about
+  35 ms per node. Nothing is *keyed* by address: the key stays `Uid`, so a renumbering
+  changes one field and breaks nothing (KONFIGURACJA.md §12).
+- **The hub writes the person's file.** Only `joined`, only from CORE, with the current
+  digest (like `blocked`), comments kept. A write that carries along a hand edit not yet
+  picked up goes in as a reload does, reconciling included; a write that fails is an
+  issue, the node keeps working. Removing a node removes its whole entry (§8.4), so
+  `joined` goes with it.
+- **The bus** is named as in `hub.yaml`, or as the open bus is named when the file has
+  no such bus (`udp` on a trial). Read back by that name; with one open bus, that one
+  whatever the name; with several and no match, not loaded — an issue, and the node is
+  found at its first frame (§8.3).
+- **The model wins over the file.** `apply` loads `joined` only for a node the model
+  does not hold; two entries claiming one address are an issue, not a pick.
+- **Not done:** a readdress (`Installation.readdress`) has no caller yet; whoever adds
+  one calls `CoreThread.note_joined` too.
 
 ### 8.2 Dlaczego model ma dwie tablice
 
@@ -1279,7 +1331,8 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 | **własne ramki** | gniazdo ich nie odbiera, więc podgląd połknie komendę huba (§4.2); wiemy, nie widzieliśmy |
 | **opóźnienie na RPi** | 22 µs zmierzone na magistrali w procesie, bez ani jednego wywołania systemowego |
 | **`bus-off` i błędy magistrali** | `VirtualBus` sortuje kolejkę, zamiast przegrywać arbitraż bit po bicie (**H4**) |
-| **`fsync` na karcie SD** | dziesiątki do setek ms; dlatego zapis jest w wątku STORE (§5.2) |
+| **`fsync` na karcie SD** | dziesiątki do setek ms; dlatego zapis jest w wątku STORE (§5.2). Writing `joined` to the file happens on CORE, once per joined node — the same as every write from the API; a wave of forty joins is forty small writes, not measured on the card |
+| **a restart with nodes from the file** (§8.6) | tested in-process and once on `--udp` with `lagun-sim`; on the RPi: `lagun-hub run`, nodes admitted, `Ctrl-C`, `lagun-hub run`, `G` at once in the view |
 | **zegar** | RPi bez RTC wstaje w 1970 i wraca do teraz po `ntp` |
 | **wiele magistral** | zaprojektowane i skompilowane, ale każdy test używa jednej |
 | **a SocketCAN bus going down** (§9.3) | tested on a fake `/sys` and a fake socket only (`zadania/zrobione/BUG-04.md`). On the RPi: `ip link set can0 down` under traffic → `FAILURE`, back within ~1 s; the same without the sudo rule → `GAVE UP` at once, then `up` by hand → working again; "apply" in `Buses` → no alarm; start with `can0` down; a USB adapter out and back in → socket reopened. Also to confirm: `send` while down gives `ENETDOWN` every time, and why the hub saw `ENETDOWN` right at start on 2026-10-06 (a bare `bind` to a down interface should not give it) |

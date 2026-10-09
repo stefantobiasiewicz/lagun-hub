@@ -80,6 +80,8 @@ class Job:
     endpoints: dict[int, dict[int, int]] = field(default_factory=dict)
     pending: list[tuple[int, int]] = field(default_factory=list)
     expanded: bool = False
+    then: list[Callable[[bool], None]] = field(default_factory=list)
+    """Who waits for this enumeration to end — `True` when the model is in place."""
 
 
 class Enumerator:
@@ -114,10 +116,22 @@ class Enumerator:
 
     # --- the beginning --------------------------------------------------------
 
-    def start(self, record: JoinRecord) -> bool:
-        if not record.address or record.short_id in self._jobs:
+    def start(self, record: JoinRecord, then: Callable[[bool], None] | None = None) -> bool:
+        """Start reading the node. `then` is told how it ended — also when an enumeration
+        of this node is already running, which it then waits for rather than starting a
+        second. Returns whether this call started one."""
+        if not record.address:
+            if then is not None:
+                then(False)
+            return False
+        running = self._jobs.get(record.short_id)
+        if running is not None:
+            if then is not None:
+                running.then.append(then)
             return False
         job = Job(short_id=record.short_id, address=record.address, bus=record.bus)
+        if then is not None:
+            job.then.append(then)
         job.pending = [(0, element) for element in DEVICE_READS]
         self._jobs[record.short_id] = job
         self.started += 1
@@ -193,6 +207,7 @@ class Enumerator:
         del self._jobs[job.short_id]
         if job.uid is None:
             self.failed += 1
+            _tell(job, False)
             return
 
         previous = self.installation.nodes.get(job.uid)
@@ -240,6 +255,7 @@ class Enumerator:
         self.completed += 1
         if self._on_ready is not None:
             self._on_ready(node)
+        _tell(job, True)
 
     def _system(self, node: NodeModel, job: Job) -> None:
         """System endpoints are **inserted, not polled** (01-model-danych.md §1.2).
@@ -289,6 +305,12 @@ class Enumerator:
         self.failed += 1
         if self._on_failed is not None:
             self._on_failed(record, reason)
+        _tell(job, False)
+
+
+def _tell(job: Job, ready: bool) -> None:
+    for then in job.then:
+        then(ready)
 
 
 def _width(length: int) -> str:

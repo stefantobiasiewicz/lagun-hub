@@ -591,7 +591,9 @@ def _run(args: argparse.Namespace, where: Path) -> int:
     print("SIGHUP reloads the configuration", flush=True)
 
     installation = Installation()
-    apply(installation, config)
+    # Addresses come from the file, `joined` — the hub talks to a node it joined before
+    # the restart at once, without waiting for it to speak (zadania/BUG-05.md).
+    apply(installation, config, [bus.name for bus in opened])
     installation.issues.extend(issues)
     store = ConfigStore(where)
     return _serve(

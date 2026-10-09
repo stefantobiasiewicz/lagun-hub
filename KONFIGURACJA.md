@@ -62,6 +62,19 @@ jednej sytuacji, w której to ma znaczenie: hub, który zgubił pliki, pokazywa�
 > **Utrata konfiguracji ma być widoczna.** Model bez nazw jest niewygodny i natychmiast
 > mówi, czego brakuje; model z nazwami i bez reszty decyzji kłamie.
 
+### 1.2 One thing from the model lives in the file: where a node sits
+
+The table above puts "`Uid` → address" among what is discovered. It is not — **the hub
+assigns the address**, and of the whole model it is the one thing that cannot be read
+back at will: a silent node does not say it, and an address forgotten while its node is
+switched off would be handed to another node. So the hub writes it, with the bus and the
+`ShortId`, into the node's entry as `joined` (§4.3), and starts from it after a restart.
+Everything else the model holds is read again from the node. The database (`core/store/`)
+is not used today (`zadania/BUG-05.md`, D1–D2).
+
+A copy of the configuration directory is therefore a copy of the installation *including
+where every node sits*.
+
 ---
 
 ## 2. Trzeci podział: gdzie konfiguracja skutkuje
@@ -174,15 +187,41 @@ nodes:
     blocked: true
 ```
 
-It is a field of the node entry, keyed by `Uid` like everything here, and not a record in
-the hub's database: it has to survive a restart, and an address — the only thing a
-database would add — changes when the node is admitted again. `B` in the view and
+It is a field of the node entry, keyed by `Uid` like everything here: it is a decision,
+it has to survive a restart, and the `Uid` — unlike the address — never changes. `B` in
+the view and
 `POST /nodes/{uid}/block` write it; a node the file does not know yet gets an entry
 holding nothing but the block, and unblocking such an entry removes it whole.
 
 Removing a node (`X` in the view, `POST /nodes/{uid}/remove`) is the opposite: its entry
 **and every binding naming it** leave the file
 ([`ARCHITEKTURA.md`](ARCHITEKTURA.md) §8.4).
+
+### 4.3 Where a joined node sits — written by the hub
+
+```yaml
+nodes:
+  "08090a0b0c0d0e0f":
+    alias: kitchen-relay
+    name: "The lamp over the table"
+    joined: {address: 0x012, bus: ground-floor, short_id: 0x5A1B2C3D}
+```
+
+`joined` is **the hub's line in a person's file** (§1.2). The hub writes it when a node
+is enumerated and the line differs from what the bus said, and nowhere else; an admitted
+node without an entry gets one holding just this line. A hub starting on the file has the
+node `READY` at that address at once — commands work, and bindings with it as a target,
+before it says a word ([`ARCHITEKTURA.md`](ARCHITEKTURA.md) §8.6).
+
+- `bus` is the name from `buses:`; with one bus open, a name that matches nothing still
+  means that bus.
+- It is checked like everything else: an address outside `0x001`–`0x7FD`, a missing key
+  or two entries claiming one address stop the file or are an issue — never a guess.
+- Editing it by hand is allowed and rarely right: the bus has the last word, and a node
+  heard at another address is reported as a disagreement between the file and the bus.
+- Removing the node removes it with the entry. An entry **without** `joined` and with a
+  `Uid` the hub then hears is let in without asking and gets the line
+  ([`06-cykl-zycia-urzadzenia.md`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md) §2.3).
 
 ## 5. Powiązania
 
@@ -622,7 +661,7 @@ dlatego jest to **K8**, a nie rozstrzygnięcie.
 
 | Czego nie ma | Gdzie to mieszka |
 |---|---|
-| adresów węzłów | nadaje je hub, trzyma baza; `Uid` jest tożsamością, adres drogą |
+| konfiguracji kluczowanej adresem | `Uid` jest tożsamością, adres drogą. The address itself **is** in the file, as a field the hub writes (`joined`, §4.3) — never as a key and never written by a person |
 | deskryptorów urządzeń | odczytane z węzłów; hub **nigdy** nie bierze zdolności z katalogu modeli |
 | harmonogramów, warunków, pory dnia | Home Assistant — poza zakresem huba i specyfikacji |
 | nastaw regulatora | atrybuty węzła; hub zmienia je komendą, nie plikiem |
@@ -632,6 +671,13 @@ zapisana na adres rozsypuje się przy pierwszym przenumerowaniu
 ([`07-hub.md`](../lagunbus-spec/07-hub.md) §2) — a adres w pliku jest przy tym **nieszkodliwy
 dopóty, dopóki się zgadza**, czyli jest usterką, która ujawnia się najpóźniej, jak to
 możliwe.
+
+That holds for configuration **keyed** by address — bindings to `0x2A`. `joined` (§4.3) is
+not that: the key stays `Uid`, a renumbering changes one field the hub itself writes, and
+a stale address in it is caught the way a stale database would be — the node is heard
+elsewhere and the disagreement is reported (`zadania/BUG-05.md`, D1). When the
+configuration directory is a git repository (§11.6), admitting a node is a change in it:
+the history then says when each node joined.
 
 ---
 

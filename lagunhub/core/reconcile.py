@@ -67,6 +67,10 @@ class Reconciler:
         if key in self._tasks or self.installation.is_blocked(node.uid):
             # A blocked node is not configured (06-cykl-zycia-urzadzenia.md §8).
             return False
+        if not node.described:
+            # Taken from the file, endpoints not read yet: there is nothing to compare
+            # against. Reconciling follows its enumeration (zadania/BUG-05.md, N9).
+            return False
         task = Task(node=node, pending=list(self._wanted(node)))
         if not task.pending:
             return False

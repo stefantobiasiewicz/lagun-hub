@@ -231,6 +231,14 @@ class NodeModel:
     endpoints: dict[int, EndpointModel] = field(default_factory=dict)
     last_heard: float = 0.0
     silence_threshold: float = 0.0
+    described: bool = True
+    """Whether the hub has read the descriptor of the node it holds.
+
+    `False` only for a node taken from the file after a restart: the address is known,
+    so commands and bindings work, but the endpoints are not — the file keeps where a
+    node is, not what it is (zadania/BUG-05.md, N9). The hub reads it at the node's
+    first frame, or first, before an operation that needs it — never by polling
+    everybody at start (07-hub.md §5.1)."""
 
     def endpoint(self, number: int) -> EndpointModel:
         """An endpoint the hub knows nothing about yet is still an endpoint."""
@@ -295,10 +303,8 @@ class Installation:
     """Nodes the operator told the hub not to serve — from the configuration file,
     keyed by `Uid` (06-cykl-zycia-urzadzenia.md §8).
 
-    The file and not the database, for two reasons: the block has to survive a restart,
-    and the hub does not keep its database yet; and an address — the only thing a
-    database would add — changes when the node is admitted again, while the `Uid` never
-    does.
+    The file, keyed by `Uid`: a block is an operator's decision, it has to survive a
+    restart, and the `Uid` — unlike the address — never changes.
     """
 
     issues: list[str] = field(default_factory=list)
@@ -387,7 +393,10 @@ class Installation:
         return None
 
     def readdress(self, uid: Uid, address: int) -> None:
-        """The only place where a node’s address changes."""
+        """The only place where a node’s address changes.
+
+        Whoever calls it writes the new address to the file as well
+        (`CoreThread.note_joined`) — the file is where the address survives a restart."""
         node = self.nodes[uid]
         self.by_address.pop(node.address, None)
         self.addresses.release(node.address)

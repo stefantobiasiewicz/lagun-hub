@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 
 from lagunhub.core.busload import SAMPLE, BusCounts, BusMeter
 from lagunhub.core.commissioning import Commissioning
+from lagunhub.core.config.apply import apply, bus_label
 from lagunhub.core.config.loader import ConfigError
 from lagunhub.core.config.model import Config
 from lagunhub.core.config.store import ConfigStore
@@ -39,7 +40,7 @@ from lagunhub.core.rx import ColdItem, Received, Sent, Task
 from lagunhub.core.schedule import Schedule
 from lagunhub.core.segments import SegmentReassembler
 from lagunhub.core.store import StoreThread
-from lagunhub.core.strangers import Strangers
+from lagunhub.core.strangers import RETRY, Strangers
 from lagunhub.core.traffic import Traffic, TrafficBus
 from lagunhub.core.transactions import Outcome, TidAllocator, TransactionManager
 from lagunhub.protocol.bus.base import Bus
@@ -126,6 +127,7 @@ class CoreThread(threading.Thread):
             self._read,
             clock,
             on_pending=self._on_pending,
+            on_known=self._on_known,
             on_uid_conflict=self._on_uid_conflict,
         )
         self.events = EventBus()
@@ -161,6 +163,10 @@ class CoreThread(threading.Thread):
         self.meter.sample(clock())
         self.schedule.after(clock(), SAMPLE, self._sample)
         self._dirty = True
+        self._describe_after: dict[Uid, float] = {}
+        """Nodes from the file whose descriptor could not be read, and when their next
+        frame may try again — the same minute `Strangers` waits, for the same reason: a
+        node that keeps talking and does not answer would start a read on every frame."""
         self._reports: dict[Source, tuple[Target, ...]] = {}
         self._issues_seen = 0
         self._stop = threading.Event()
@@ -482,6 +488,7 @@ class CoreThread(threading.Thread):
             # equally proof that somebody sits at this address
             # (06-cykl-zycia-urzadzenia.md §2.3).
             self.strangers.heard(item.bus, fields.address)
+            self._first_frame(fields.address)
 
         if fields.kind == MessageKind.REPORT:
             changed = self.installation.on_report(
@@ -658,12 +665,112 @@ class CoreThread(threading.Thread):
         )
         self.touch()
 
+    def _on_known(self, record: JoinRecord) -> None:
+        """A node under an unknown address whose `Uid` is in the file: in without asking,
+        because the entry is the operator's decision, made before
+        (06-cykl-zycia-urzadzenia.md §2.3; lagunbus-spec/DECYZJE.md, "Węzeł z adresem,
+        którego `Uid` hub ma w konfiguracji, wchodzi sam")."""
+        self.events.publish(
+            Event(
+                kind=EventKind.NODE,
+                at=self.clock(),
+                uid=record.uid,
+                name=record.state.name,
+                text=(
+                    f"0x{record.address:03X} is a node from the configuration — "
+                    f"enumerating it without asking"
+                ),
+            )
+        )
+        self.enumeration.start(record)
+        self.touch()
+
     def _on_enumerated(self, node: NodeModel) -> None:
+        self._describe_after.pop(node.uid, None)
         self._announce_node(node.uid, node.state.name)
+        self.note_joined(node)
         self.touch()  # a node arrived, so bindings may have a new target
         # The hub writes to the node what it holds itself — that way round, never the
         # other. A blocked one is skipped by the reconciler itself.
         self.reconcile.start(node)
+
+    # --- nodes from the file ----------------------------------------------------
+
+    def _first_frame(self, address: int) -> None:
+        """A node taken from the file has spoken: now is the time to read what it is
+        (zadania/BUG-05.md, N9).
+
+        The frame that came anyway is the occasion, as everywhere after a restart — the
+        hub does not poll everybody at start (07-hub.md §5.1). Reconciling follows the
+        enumeration by itself, so a change made to the file while the hub was down
+        reaches the node too. A blocked node is not read (06-cykl-zycia-urzadzenia.md
+        §8).
+        """
+        uid = self.installation.by_address.get(address)
+        node = self.installation.nodes.get(uid) if uid is not None else None
+        if node is None or node.described or node.state == NodeState.BLOCKED:
+            return
+        if self.enumeration.busy(node.short_id) or self.clock() < self._describe_after.get(
+            node.uid, 0.0
+        ):
+            return
+
+        def done(ready: bool) -> None:
+            if not ready:
+                self._describe_after[node.uid] = self.clock() + RETRY
+
+        self.describe(node, done)
+
+    def describe(self, node: NodeModel, then: Callable[[bool], None] | None = None) -> None:
+        """Read the descriptor of a node the hub holds — or wait for the read already
+        running. `then` hears whether the model is in place."""
+        record = self.installation.records.get(node.short_id)
+        if record is None or not record.address:
+            record = self.installation.record(node.short_id)
+            record.address, record.bus, record.uid = node.address, node.bus, node.uid
+            record.state = node.state
+        self.enumeration.start(record, then)
+
+    def note_joined(self, node: NodeModel) -> None:
+        """Write where the node sits to its entry in the file — `joined`
+        (zadania/BUG-05.md, D1, N6).
+
+        The file is where an address survives a restart. The hub writes only what it
+        learned from the bus, and only when it differs from what the file says, so an
+        enumeration of a node whose entry is right touches nothing. A node in the model
+        wins over the file: the model came from the bus, and the file may be a backup.
+
+        A file that cannot be written does not stop the node — it works now, and is
+        reported, because after the next restart it would not.
+        """
+        store = self.config_store
+        if store is None or not node.address or not node.short_id:
+            return
+        names = [bus.name for bus in self.buses]
+        edited = store.changed()  # by hand, and not picked up yet
+        try:
+            config = store.set_joined(
+                bytes(node.uid),
+                node.address,
+                bus_label(self.config, names, node.bus),
+                node.short_id,
+            )
+        except (ConfigError, OSError) as exc:
+            self.installation.issues.append(
+                f"{bytes(node.uid).hex()}: its address could not be written to the "
+                f"configuration ({exc}) — after a restart the hub will not know it"
+            )
+            return
+        if config is None:
+            return
+        if edited:
+            # The write took somebody's edit along with it — and marked the file as
+            # seen. It has to go in the way every edit does, reconciling included.
+            self.apply_config(config)
+            return
+        self.config = config
+        apply(self.installation, config, names)
+        self.touch()
 
     def _on_enumeration_started(self, record: JoinRecord) -> None:
         """Enumeration builds a new model, so a readout of the old one stops
@@ -791,11 +898,9 @@ class CoreThread(threading.Thread):
 
     def apply_config(self, config: Config) -> None:
         """Load the configuration and bring the nodes into agreement with it."""
-        from lagunhub.core.config.apply import apply
-
         self.config = config
         before = self.installation.blocked
-        apply(self.installation, config)
+        apply(self.installation, config, [bus.name for bus in self.buses])
         self._apply_blocks(before, self.installation.blocked)
         self.touch()
         self.flush()

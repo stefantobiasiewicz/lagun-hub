@@ -29,6 +29,7 @@ from lagunhub.core.config.model import (
     Config,
     EndpointConfig,
     GroupConfig,
+    JoinedConfig,
     NodeConfig,
     SourceRef,
     TargetRef,
@@ -37,6 +38,7 @@ from lagunhub.core.model import Uid
 from lagunhub.protocol.endpoints import by_name
 from lagunhub.protocol.endpoints.definition import AttributeDef, encode_fields
 from lagunhub.protocol.endpoints.enums import coerce
+from lagunhub.protocol.frame import ADDRESS_NODE_MAX, ADDRESS_NODE_MIN
 from lagunhub.protocol.registry import (
     FIRST_FUNCTIONAL_ENDPOINT,
     CommonAttribute,
@@ -261,7 +263,44 @@ def _node(key: str, raw: dict[str, Any], groups: dict[int, GroupConfig]) -> Node
         room=str(raw.get("room", "")),
         endpoints=endpoints,
         blocked=blocked,
+        joined=_joined(alias, raw["joined"]) if raw.get("joined") is not None else None,
     )
+
+
+def _joined(alias: str, raw: Any) -> JoinedConfig:
+    """What the hub wrote. Checked as strictly as anything a person wrote — a hand edit
+    that breaks it must stop the file, not put a node at an address it does not hold."""
+    if not isinstance(raw, Mapping):
+        raise ConfigError(f"{alias}: `joined` is a mapping of address, bus and short_id")
+    missing = {"address", "bus", "short_id"} - set(raw)
+    if missing:
+        raise ConfigError(f"{alias}: `joined` lacks {', '.join(sorted(missing))}")
+    address = _number(alias, "address", raw["address"])
+    if not ADDRESS_NODE_MIN <= address <= ADDRESS_NODE_MAX:
+        raise ConfigError(
+            f"{alias}: `joined.address` {address:#05x} is not a node address "
+            f"(0x{ADDRESS_NODE_MIN:03X}-0x{ADDRESS_NODE_MAX:03X})"
+        )
+    short_id = _number(alias, "short_id", raw["short_id"])
+    if not 0 <= short_id <= 0xFFFF_FFFF:
+        raise ConfigError(f"{alias}: `joined.short_id` is 32 bits, got {short_id:#x}")
+    bus = str(raw["bus"])
+    if not bus:
+        raise ConfigError(f"{alias}: `joined.bus` is empty")
+    return JoinedConfig(address=address, bus=bus, short_id=short_id)
+
+
+def _number(alias: str, key: str, raw: Any) -> int:
+    """An integer written as `0x012` or `18` — YAML reads the first as a number already,
+    a quoted one comes as text."""
+    if isinstance(raw, bool):
+        raise ConfigError(f"{alias}: `joined.{key}` is a number, got {raw!r}")
+    if isinstance(raw, int):
+        return raw
+    try:
+        return int(str(raw), 0)
+    except ValueError:
+        raise ConfigError(f"{alias}: `joined.{key}` is a number, got {raw!r}") from None
 
 
 def _endpoint(

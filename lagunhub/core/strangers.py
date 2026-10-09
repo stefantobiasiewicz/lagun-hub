@@ -12,10 +12,15 @@ minutes after the nodes, so their `Booted` is usually gone by then. Every node r
 up within five minutes — without polling everyone after a restart (07-hub.md §5.1).
 
 The hub reads `Uid` and `ShortId` from that address — one identification per address,
-not one per frame — and puts the node in `PENDING`. It never lets it in by itself, not
+not one per frame — and puts the node in `PENDING`. It does not let it in by itself, not
 even with the accepting mode open: the mode is about nodes that announce, i.e. nodes
 **without** an address. This one brought a configuration the hub knows nothing about,
 and the decision belongs to a person.
+
+**Unless its `Uid` is in the configuration file.** Then it is not unknown: the entry is
+the operator's decision, made before, and the node is enumerated under the address it
+has — the case of a file older than the bus (zadania/BUG-05.md, D4). A blocked one stays
+`BLOCKED`.
 
 **Why `ShortId` is read and not computed from `Uid`.** Computing assumes the node computes
 it the same way. Ours did not — it took the four high bytes instead of a CRC-32 — and
@@ -69,12 +74,14 @@ class Strangers:
         clock: Callable[[], float],
         *,
         on_pending: Callable[[JoinRecord], None] | None = None,
+        on_known: Callable[[JoinRecord], None] | None = None,
         on_uid_conflict: Callable[[int, Uid, int], None] | None = None,
     ) -> None:
         self.installation = installation
         self._request = request
         self._clock = clock
         self._on_pending = on_pending
+        self._on_known = on_known
         self._on_uid_conflict = on_uid_conflict
         self._probes: dict[int, Probe] = {}
         self._not_before: dict[int, float] = {}
@@ -84,6 +91,7 @@ class Strangers:
 
         self.probed = 0
         self.pending = 0
+        self.known = 0
         self.blocked = 0
         self.failed = 0
 
@@ -170,6 +178,14 @@ class Strangers:
             # address so the next frame from it is not a stranger's.
             record.state = NodeState.BLOCKED
             self.blocked += 1
+            return
+        if self._on_known is not None and probe.uid in self.installation.wanted:
+            # In the file, so not unknown: the entry is the operator's decision, made
+            # before. Asking again protects against nothing — a module from another
+            # installation has no entry here (zadania/BUG-05.md, D4).
+            record.state = NodeState.JOINED
+            self.known += 1
+            self._on_known(record)
             return
         record.state = NodeState.PENDING
         self.pending += 1

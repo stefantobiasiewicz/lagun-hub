@@ -110,6 +110,12 @@ class Hub:
         self._pump.start()
         self.server.start()
         self.until(lambda: bool(self.installation.nodes), "the node did not enter the installation")
+        # Joining ends with the address written to the file (zadania/BUG-05.md); a test
+        # comparing the file before and after must not catch that write half way.
+        self.until(
+            lambda: "joined" in self.config_path.read_text(encoding="utf-8"),
+            "the node's address did not reach the file",
+        )
         # Reconciling announces state changes too — and rightly, because a front end is to
         # see the hub bringing a node into agreement. The test starts only after that, so as
         # not to take
