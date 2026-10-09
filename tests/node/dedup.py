@@ -19,9 +19,13 @@ WINDOW: Final = 0.300
 """Exactly the budget of three attempts at 100 ms. Every millisecond beyond that eats
 into the Tid reserve and protects nothing."""
 
-CAPACITY: Final = 8
-"""As many as there are Tid values. A smaller buffer would throw out a command still
-inside the window — and then its repetition would be carried out a second time."""
+CAPACITY: Final = 16
+"""Every command of the window must fit — a buffer that throws out a command still inside
+it carries its repetition out a second time. The specification asks for at least eight
+and "two per endpoint that takes commands". Eight is not a ceiling: the hub counts Tid
+per endpoint and command (``TidAllocator``), so eight outputs switched at once and a
+ninth command right after are all in one window. Sixteen, as in the node library's
+``LB_DEDUP_ENTRIES`` (zadania/zrobione/BUG-02.md)."""
 
 Key = tuple[int, int, int]
 """``(Tid, endpoint, command)`` — a Tid alone is not enough, it has only eight values."""
