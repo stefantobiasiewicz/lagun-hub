@@ -471,6 +471,18 @@ dtoverlay=mcp251xfd,spi0-0,interrupt=25,oscillator=40000000
 Numer przerwania i wybór `spi0-0` / `spi0-1` zależą od nakładki. Co ta nakładka
 przyjmuje, wypisuje `/boot/overlays/README` — szukaj `mcp251xfd`.
 
+> **Check that `interrupt=` is the pin INT really reaches — by measuring, not by the
+> manual.** On the KAmodRPi CAN-FD (2026-10-06) jumper J7 sat in the position its
+> documentation gives for GPIO25, and INT went to GPIO24. Nothing fails loudly: the pin
+> named in `interrupt=` floats on the Pi's own pull-down, reads as an interrupt that
+> never ends, and after 100 000 of them the kernel switches it off (`irq NN: nobody
+> cared … Disabling IRQ #NN` in `dmesg`). From then on it looks at the chip every
+> 100 ms — the bus works, only every frame is up to 100 ms late, nearly every
+> transaction is retried, and a `Toggle` may run twice. To find the pin: with `can0` up,
+> `sudo pinctrl set 24 ip pu; sudo pinctrl set 25 ip pu`, let one frame arrive, then
+> `pinctrl get 24; pinctrl get 25` — INT is the one that reads `lo` (the chip holds it
+> low until the frame is read, and nobody reads it). zadania/FEAT-11.md.
+
 ```bash
 sudo reboot
 ```
@@ -687,6 +699,7 @@ cansend can0 123#DEADBEEF     # ramka z palca
 | hub wstaje, ale nie widzi węzłów | najpierw `candump can0` — jeśli tam cisza, to nie hub |
 | ramki są, ale bez sensu | **rezonator**; sprawdź `oscillator=` w `config.txt` |
 | hub kończy z kodem 2 | konfiguracja — komunikat powie, która linia |
+| everything works, but every answer takes ~100 ms and `retried` keeps growing | the interrupt pin: `dmesg \| grep -B2 "Disabling IRQ"` and `grep spi0.0 /proc/interrupts` — a counter that stands still while frames arrive means `interrupt=` is not where INT goes (see SPI i nakładka) |
 
 Zasada, która oszczędza wieczory: **`candump` przed hubem**. Jeśli `candump` nic nie
 widzi, żadna ilość patrzenia w hub nie pomoże.
