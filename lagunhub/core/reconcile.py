@@ -69,7 +69,7 @@ class Reconciler:
             return False
         if not node.described:
             # Taken from the file, endpoints not read yet: there is nothing to compare
-            # against. Reconciling follows its enumeration (zadania/BUG-05.md, N9).
+            # against. Reconciling follows its enumeration (zadania/zrobione/BUG-05.md, N9).
             return False
         task = Task(node=node, pending=list(self._wanted(node)))
         if not task.pending:

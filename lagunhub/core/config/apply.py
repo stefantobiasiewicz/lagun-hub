@@ -37,7 +37,7 @@ def _restore(
     installation: Installation, config: Config, opened: Sequence[str], entry: NodeConfig
 ) -> None:
     """A node the file says is joined: in the model at once, under its address
-    (zadania/BUG-05.md, D3).
+    (zadania/zrobione/BUG-05.md, D3).
 
     `READY` — the hub talks to it straight away, and bindings with it as a target work
     from the first second. Not "not heard since the start", not polled: a node that is
@@ -91,7 +91,7 @@ def _restore(
 
 
 def bus_index(config: Config, opened: Sequence[str], name: str) -> int | None:
-    """Which open bus a `joined.bus` names (zadania/BUG-05.md, N8).
+    """Which open bus a `joined.bus` names (zadania/zrobione/BUG-05.md, N8).
 
     By the name an open bus has (its channel — or `udp`, or a test's), or by the name
     the file gives a bus with that channel. When the hub has one bus, that one: a bus

@@ -698,7 +698,7 @@ class CoreThread(threading.Thread):
 
     def _first_frame(self, address: int) -> None:
         """A node taken from the file has spoken: now is the time to read what it is
-        (zadania/BUG-05.md, N9).
+        (zadania/zrobione/BUG-05.md, N9).
 
         The frame that came anyway is the occasion, as everywhere after a restart — the
         hub does not poll everybody at start (07-hub.md §5.1). Reconciling follows the
@@ -733,7 +733,7 @@ class CoreThread(threading.Thread):
 
     def note_joined(self, node: NodeModel) -> None:
         """Write where the node sits to its entry in the file — `joined`
-        (zadania/BUG-05.md, D1, N6).
+        (zadania/zrobione/BUG-05.md, D1, N6).
 
         The file is where an address survives a restart. The hub writes only what it
         learned from the bus, and only when it differs from what the file says, so an

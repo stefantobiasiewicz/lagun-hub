@@ -19,7 +19,7 @@ and the decision belongs to a person.
 
 **Unless its `Uid` is in the configuration file.** Then it is not unknown: the entry is
 the operator's decision, made before, and the node is enumerated under the address it
-has — the case of a file older than the bus (zadania/BUG-05.md, D4). A blocked one stays
+has — the case of a file older than the bus (zadania/zrobione/BUG-05.md, D4). A blocked one stays
 `BLOCKED`.
 
 **Why `ShortId` is read and not computed from `Uid`.** Computing assumes the node computes
@@ -182,7 +182,7 @@ class Strangers:
         if self._on_known is not None and probe.uid in self.installation.wanted:
             # In the file, so not unknown: the entry is the operator's decision, made
             # before. Asking again protects against nothing — a module from another
-            # installation has no entry here (zadania/BUG-05.md, D4).
+            # installation has no entry here (zadania/zrobione/BUG-05.md, D4).
             record.state = NodeState.JOINED
             self.known += 1
             self._on_known(record)

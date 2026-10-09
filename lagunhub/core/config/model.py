@@ -9,7 +9,7 @@ an identity — a configuration written "to address `0x2A`" falls apart at the f
 renumbering. The address a node holds is still **written down**, as a field of its
 entry (`JoinedConfig`): the hub assigned it, and a hub that forgets it after a restart
 can neither reach a silent node nor keep its address from somebody else
-(zadania/BUG-05.md).
+(zadania/zrobione/BUG-05.md).
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ class JoinedConfig:
     a database because it is the only part of the installation model that cannot be
     read back from the bus at will: the hub assigned the address, a silent node will not
     say it, and an address forgotten while its node is switched off would be handed to
-    another one (lagunbus-spec/07-hub.md §5; zadania/BUG-05.md, D1). Everything else the
+    another one (lagunbus-spec/07-hub.md §5; zadania/zrobione/BUG-05.md, D1). Everything else the
     model holds — the descriptor, the firmware — enumeration reads again, once, at the
     node's first frame.
 

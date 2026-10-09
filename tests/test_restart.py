@@ -1,5 +1,5 @@
 """A restart of the hub — the installation is still there afterwards
-(zadania/BUG-05.md; lagunbus-spec/07-hub.md §5).
+(zadania/zrobione/BUG-05.md; lagunbus-spec/07-hub.md §5).
 
 Before, a restart looked to the installation exactly like a lost database: every node
 the hub knew came back without an address, so nothing could be done from the view, and a

@@ -70,7 +70,7 @@ back at will: a silent node does not say it, and an address forgotten while its 
 switched off would be handed to another node. So the hub writes it, with the bus and the
 `ShortId`, into the node's entry as `joined` (§4.3), and starts from it after a restart.
 Everything else the model holds is read again from the node. The database (`core/store/`)
-is not used today (`zadania/BUG-05.md`, D1–D2).
+is not used today (`zadania/zrobione/BUG-05.md`, D1–D2).
 
 A copy of the configuration directory is therefore a copy of the installation *including
 where every node sits*.
@@ -675,7 +675,7 @@ możliwe.
 That holds for configuration **keyed** by address — bindings to `0x2A`. `joined` (§4.3) is
 not that: the key stays `Uid`, a renumbering changes one field the hub itself writes, and
 a stale address in it is caught the way a stale database would be — the node is heard
-elsewhere and the disagreement is reported (`zadania/BUG-05.md`, D1). When the
+elsewhere and the disagreement is reported (`zadania/zrobione/BUG-05.md`, D1). When the
 configuration directory is a git repository (§11.6), admitting a node is a change in it:
 the history then says when each node joined.
 

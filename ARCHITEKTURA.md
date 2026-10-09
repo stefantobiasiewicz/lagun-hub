@@ -546,7 +546,7 @@ accepting mode open — the mode is for nodes that announce, i.e. nodes without 
 **A node whose `Uid` is in the file is not pending**: the entry is the operator's
 decision, made before, so it is enumerated straight away — the case of a file older than
 the bus, such as a backup or a node joined before the hub wrote addresses down
-(`zadania/BUG-05.md`, D4; `lagunbus-spec/DECYZJE.md`, "Węzeł z adresem, którego `Uid` hub
+(`zadania/zrobione/BUG-05.md`, D4; `lagunbus-spec/DECYZJE.md`, "Węzeł z adresem, którego `Uid` hub
 ma w konfiguracji, wchodzi sam").
 
 **Heard addresses live in memory only.** After a restart every working node is heard again
@@ -635,7 +635,7 @@ read_all(node)        Readout: one READ after another ── each reply → mode
 
 ### 8.6 After a restart
 
-Worked out in `zadania/BUG-05.md`. Before it a restart looked to the installation like a
+Worked out in `zadania/zrobione/BUG-05.md`. Before it a restart looked to the installation like a
 lost database: every node came back without an address, every operation ended at "the
 hub has not seen it yet", and a node that spoke waited as `PENDING`.
 

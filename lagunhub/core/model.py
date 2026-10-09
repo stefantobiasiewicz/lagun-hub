@@ -236,7 +236,7 @@ class NodeModel:
 
     `False` only for a node taken from the file after a restart: the address is known,
     so commands and bindings work, but the endpoints are not — the file keeps where a
-    node is, not what it is (zadania/BUG-05.md, N9). The hub reads it at the node's
+    node is, not what it is (zadania/zrobione/BUG-05.md, N9). The hub reads it at the node's
     first frame, or first, before an operation that needs it — never by polling
     everybody at start (07-hub.md §5.1)."""
 

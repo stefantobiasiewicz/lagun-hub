@@ -1383,7 +1383,7 @@ class HubApi:
         """From CORE: `run`, once the hub has read what this node is.
 
         A node taken from the file after a restart is reachable at once, but its
-        endpoints are read only at its first frame (zadania/BUG-05.md, N9). An operation
+        endpoints are read only at its first frame (zadania/zrobione/BUG-05.md, N9). An operation
         that comes first does not stop at "the hub does not know this endpoint yet" —
         it reads the descriptor, one node, and goes on. A node the hub cannot reach is
         `run`'s business: whatever it raises is the right answer.

@@ -182,7 +182,7 @@ class ConfigStore:
 
     def set_joined(self, uid: bytes, address: int, bus: str, short_id: int) -> Config | None:
         """Write where a node sits — `joined` in its entry, created when the file has no
-        entry for it (zadania/BUG-05.md, N6). `None` when the file says so already.
+        entry for it (zadania/zrobione/BUG-05.md, N6). `None` when the file says so already.
 
         The **current** digest, not one somebody saw: this is the hub's own field, written
         because of something the bus said, with no stale view of the file to protect —
