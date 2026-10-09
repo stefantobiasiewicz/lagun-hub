@@ -41,7 +41,7 @@ from lagunhub.core.segments import SegmentReassembler
 from lagunhub.core.store import StoreThread
 from lagunhub.core.strangers import Strangers
 from lagunhub.core.traffic import Traffic, TrafficBus
-from lagunhub.core.transactions import Outcome, TransactionManager
+from lagunhub.core.transactions import Outcome, TidAllocator, TransactionManager
 from lagunhub.protocol.bus.base import Bus, TransmitQueueFull
 from lagunhub.protocol.endpoints import device as dev
 from lagunhub.protocol.frame import Frame, decode_header
@@ -83,6 +83,7 @@ class CoreThread(threading.Thread):
         config_store: ConfigStore | None = None,
         observer: Callable[[ColdItem], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        tids: TidAllocator | None = None,
         name: str = "core",
     ) -> None:
         super().__init__(name=name, daemon=True)
@@ -99,7 +100,11 @@ class CoreThread(threading.Thread):
         self.clock = clock
         self.buses = list(buses)
         self.schedule = Schedule()
-        self.transactions = TransactionManager(self._send, self.schedule, clock)
+        self.transactions = TransactionManager(self._send, self.schedule, clock, tids)
+        """`tids` is **the binding engine's** allocator in a running hub: a command from a
+        binding and one from CORE to the same endpoint must not get the same `Tid` within
+        the node's deduplication window (BUG-06). Without it — a counter of its own, which
+        is fine only for a hub with no fast path."""
         self.segments = SegmentReassembler(
             self.schedule, clock, self._on_segments, self._on_segments_lost
         )

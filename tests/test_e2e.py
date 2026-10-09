@@ -116,7 +116,12 @@ def build(  # type: ignore[no-untyped-def]
     rx = RxThread([hub_port], engine, cold)
     engine.on_sent = lambda bus, frame: rx.offer(Sent(bus, frame, clock.now))
     core = CoreThread(
-        installation, cold, lambda s: setattr(engine, "snapshot", s), buses=[hub_port], clock=clock
+        installation,
+        cold,
+        lambda s: setattr(engine, "snapshot", s),
+        buses=[hub_port],
+        clock=clock,
+        tids=engine.tids,
     )
     preview = port("preview_port")
     if settle:
@@ -141,6 +146,26 @@ def test_a_key_toggles_a_relay(tmp_path) -> None:  # type: ignore[no-untyped-def
 
     assert inst.engine.matched == 2
     assert inst.engine.sent == 2
+
+
+def test_a_binding_and_core_draw_tids_from_one_counter(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A click through the binding, then `Toggle` from CORE to the same output within
+    300 ms — two commands, two toggles (BUG-06).
+
+    With a counter each, both started at 0: the node saw the same `Tid` + endpoint +
+    command inside its deduplication window, sent back the remembered `OK` and did not
+    switch. The hub reported success and the light stayed as it was.
+    """
+    inst = build(tmp_path)
+    inst.click()
+    assert inst.output.values[out.ON_OFF] is True
+
+    results: list[Outcome] = []
+    inst.core.request(0x040, 4, out.TOGGLE, kind=MessageKind.COMMAND, on_done=results.append)
+    inst.run(0.050)
+
+    assert [r.ok for r in results] == [True]
+    assert inst.output.values[out.ON_OFF] is False, "the second Toggle was carried out"
 
 
 def test_the_whole_exchange_is_visible_on_the_bus(tmp_path) -> None:  # type: ignore[no-untyped-def]

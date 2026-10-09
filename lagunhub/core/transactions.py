@@ -25,6 +25,13 @@ TID_COUNT: Final = TID_MASK + 1
 """Eight values. The specification counts on all of them
 (04-interakcje.md §2.2)."""
 
+KEY_MASK: Final = 0x01FF_FFFF
+"""The address, the endpoint and the element — everything but the kind.
+
+A request and a reply differ **only in kind**: in a command `ADDRESS` is the recipient,
+in a reply the same node is the sender. The mask makes one key out of that, with no
+table translating one into the other."""
+
 
 class TidAllocator:
     """A cycling `Tid`, separate for every deduplication key.
@@ -33,6 +40,12 @@ class TidAllocator:
     into its deduplication buffer: the address, the endpoint and the element number
     ([`04`](../lagunbus-spec/04-interakcje.md) §2.2). That way eight commands to eight
     different endpoints do not clash, even if they go out within five milliseconds.
+
+    **The key is cut down here, not by the caller.** The fast path used to count by the
+    whole frame identifier and CORE by the identifier without the kind, so even one
+    shared instance held two counters for the same command — both starting at 0, and a
+    `Toggle` from the API right after the same `Toggle` from a binding went out with the
+    same `Tid` and was swallowed by the node's deduplication (BUG-06).
 
     **Allocation is shared across all threads and does without a lock.** It rests on
     two atomic CPython operations: ``dict.setdefault`` inserts the counter in one C
@@ -46,8 +59,8 @@ class TidAllocator:
     def __init__(self) -> None:
         self._counters: dict[int, itertools.count[int]] = {}
 
-    def next(self, key: int) -> int:
-        counter = self._counters.setdefault(key, itertools.count())
+    def next(self, can_id: int) -> int:
+        counter = self._counters.setdefault(can_id & KEY_MASK, itertools.count())
         return next(counter) % TID_COUNT
 
 
@@ -59,13 +72,6 @@ TIMEOUT: Final = 0.100
 ATTEMPTS: Final = 3
 """Three attempts in all, that is 0, 100 and 200 ms. After that the node is not
 answering."""
-
-KEY_MASK: Final = 0x01FF_FFFF
-"""The address, the endpoint and the element — everything but the kind.
-
-A request and a reply differ **only in kind**: in a command `ADDRESS` is the recipient,
-in a reply the same node is the sender. The mask makes one key out of that, with no
-table translating one into the other."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +156,7 @@ class TransactionManager:
         on_done: Callable[[Outcome], None] | None = None,
     ) -> Pending:
         """Send a request and mind its retries."""
-        tid = self.tids.next(can_id & KEY_MASK)
+        tid = self.tids.next(can_id)
         return self.track(
             bus, can_id, bytes([encode_header(tid)]) + args, tid, on_done=on_done, send=True
         )

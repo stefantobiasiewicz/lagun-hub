@@ -134,8 +134,15 @@ def _serve(
         rx.engine.snapshot = snapshot
 
     engine = rx.engine
+    # One `Tid` counter for both threads — see `CoreThread(tids=...)`.
     core = CoreThread(
-        installation, cold, publish, buses=buses, observer=tap, config_store=config_store
+        installation,
+        cold,
+        publish,
+        buses=buses,
+        observer=tap,
+        config_store=config_store,
+        tids=engine.tids,
     )
     core.meter.watch(received=[rx.counts], sent=[engine.counts])
     # The file the hub started with. Without it `core.config` stayed `None` until the

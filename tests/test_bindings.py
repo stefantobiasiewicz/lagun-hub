@@ -148,6 +148,15 @@ class TestTid:
         assert [tids.next(0x100) for _ in range(3)] == [0, 1, 2]
         assert [tids.next(0x200) for _ in range(3)] == [0, 1, 2]
 
+    def test_the_kind_is_not_part_of_the_key(self) -> None:
+        """The fast path passes the whole frame identifier, CORE used to pass it without
+        the kind — one counter either way (BUG-06)."""
+        from lagunhub.core.transactions import KEY_MASK, TidAllocator
+
+        tids = TidAllocator()
+        command = encode_id(MessageKind.COMMAND, 0x040, 4, 0x02)
+        assert [tids.next(command), tids.next(command & KEY_MASK)] == [0, 1]
+
     def test_allocation_is_shared_across_threads(self) -> None:
         """RX and CORE draw from the same allocator, so they cannot land on the same
         one."""

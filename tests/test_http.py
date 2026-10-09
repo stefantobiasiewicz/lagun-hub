@@ -70,7 +70,12 @@ class Hub:
 
         self.store = ConfigStore(path)
         self.core = CoreThread(
-            self.installation, self.rx.cold, publish, buses=[port], config_store=self.store
+            self.installation,
+            self.rx.cold,
+            publish,
+            buses=[port],
+            config_store=self.store,
+            tids=self.engine.tids,
         )
         self.core.meter.watch(received=[self.rx.counts], sent=[self.engine.counts])
         self.core.config = load(path)  # as `lagun-hub run` does
