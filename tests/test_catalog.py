@@ -16,6 +16,7 @@ from lagunhub.protocol.endpoints.definition import (
     decode_fields,
     encode_fields,
 )
+from lagunhub.protocol.endpoints.diagnostics import ERROR_THRESHOLD
 from lagunhub.protocol.registry import CommonAttribute, EndpointType, ResultCode
 from tests.node.devices import key1, relay1
 from tests.node.endpoints.diagnostics import Diagnostics
@@ -152,6 +153,28 @@ class TestTheNodeDoubleFollowsTheCatalog:
         assert output.read(out.INVERT)[0] == ResultCode.UNSUPPORTED_ELEMENT
         declared = Output(channel=1, optional=(out.INVERT,))
         assert declared.read(out.INVERT)[0] == ResultCode.OK
+
+    @pytest.mark.parametrize(
+        ("type_name", "attribute"),
+        [
+            ("Diagnostics", "ErrorThreshold"),
+            ("Sense", "ThresholdHysteresis"),
+            ("Output", "Invert"),
+        ],
+    )
+    def test_tuning_the_author_or_installer_knows_is_optional(
+        self, type_name: str, attribute: str
+    ) -> None:
+        """CR-04: a setting follows whoever knows its value (01-model-danych.md §8.1).
+        Build and installation are optional, so the hub must not treat their absence on
+        a node as a fault — and must not count on writing them."""
+        definition = by_name(type_name)
+        meta = next(a for a in definition.attributes.values() if a.name == attribute)
+        assert meta.optional, f"{type_name}.{attribute}"
+
+    def test_a_diagnostics_without_error_threshold(self) -> None:
+        """The node fixes the threshold itself; reading it is UNSUPPORTED_ELEMENT."""
+        assert Diagnostics().read(ERROR_THRESHOLD)[0] == ResultCode.UNSUPPORTED_ELEMENT
 
 
 class TestArgumentsBothWays:

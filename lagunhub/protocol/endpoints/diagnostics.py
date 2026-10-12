@@ -57,8 +57,19 @@ DIAGNOSTICS: Final = TypeDef(
             SUPPLY_VOLTAGE, "SupplyVoltage", "u32", "RO", reported=True, optional=True
         ),
         MCU_TEMPERATURE: A(MCU_TEMPERATURE, "McuTemperature", "i16", "RO", optional=True),
+        # Optional since CR-04: the threshold follows from the controller, so its author
+        # sets it; a node without the attribute keeps a fixed one within 16-255
+        # (01-model-danych.md §8.1).
         ERROR_THRESHOLD: A(
-            ERROR_THRESHOLD, "ErrorThreshold", "u16", "RW", persist=True, default=96, lo=16, hi=255
+            ERROR_THRESHOLD,
+            "ErrorThreshold",
+            "u16",
+            "RW",
+            persist=True,
+            default=96,
+            lo=16,
+            hi=255,
+            optional=True,
         ),
     },
     commands={RESET_COUNTERS: C(RESET_COUNTERS, "ResetCounters")},

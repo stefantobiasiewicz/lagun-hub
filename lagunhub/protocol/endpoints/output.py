@@ -144,6 +144,9 @@ OUTPUT: Final = TypeDef(
             persist=True,
             default=PowerOnBehaviour.OFF,
         ),
+        # Only "the receiver is on the normally-closed contact" — an installation fact.
+        # The polarity of the board's own relay drive is not an attribute at all; the
+        # device settles it (CR-04, types/0x0020-output.md §5.6).
         INVERT: A(INVERT, "Invert", "bool", "RW", persist=True, default=False, optional=True),
         PULSE_DURATION: A(
             PULSE_DURATION,

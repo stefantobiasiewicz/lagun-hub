@@ -61,6 +61,10 @@ SENSE: Final = TypeDef(
             "RW",
             persist=True,
             feature=Feature.THRESHOLD,
+            # Optional within the feature (CR-04): it guards against the sensor's own
+            # noise, which its author knows; the thresholds themselves are use and stay
+            # mandatory (types/0x0030-sense.md §5.4).
+            optional=True,
         ),
     },
     commands={RESET_MIN_MAX: C(RESET_MIN_MAX, "ResetMinMax", feature=Feature.MIN_MAX)},
