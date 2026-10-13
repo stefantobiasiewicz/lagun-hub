@@ -36,6 +36,9 @@ class Field:
     name: str
     type: str
     in_group_address: bool = False
+    names: tuple[str, ...] = ()
+    """The names of its values 0, 1, 2…, where it has them — `Sense.Threshold`'s `zone` —
+    so a person reads `ABOVE_HIGH`, not `2`. A tuple, so the definition stays hashable."""
     """A field that in a **group** command travels in the ADDRESS field, not the payload.
 
     Today this concerns scenes only: a scene is keyed by the pair ``(group, number)``,
@@ -74,6 +77,11 @@ class AttributeDef:
     than a dict, because a frozen definition should stay hashable.
     """
 
+    physical: bool = False
+    """In the units of the endpoint's ``Quantity`` though not typed ``<Q>`` — `Sense`'s
+    ``Offset`` and ``ThresholdHysteresis`` (types/0x0030-sense.md §2.2, §5.1). A person
+    reads and writes them as ``-0.5`` °C, the bus carries ``-50``. See `in_units`."""
+
     optional: bool = False
     """Conformance ``O`` from the type catalogue: a device **may** have it.
 
@@ -88,6 +96,13 @@ class AttributeDef:
             if known == value:
                 return feature
         return None
+
+    @property
+    def in_units(self) -> bool:
+        """A person sees and gives it in the quantity's units — ``26.5`` °C, not ``2650``:
+        in the file, in the view and through the API (zadania/zrobione/DEVICE-01.md N5,
+        N12). Only the node and the bus speak in steps."""
+        return self.physical or self.type == QUANTITY_TYPE
 
     @property
     def readable(self) -> bool:

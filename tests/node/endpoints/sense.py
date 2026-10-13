@@ -10,11 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import ClassVar
 
-from lagunhub.protocol.endpoints.definition import CommandDef, TypeDef
+from lagunhub.protocol.endpoints.definition import QUANTITY_TYPE, CommandDef, TypeDef
 from lagunhub.protocol.endpoints.sense import QUANTITY, SENSE, VALUE
 from lagunhub.protocol.quantities import Quantity
 from lagunhub.protocol.registry import ResultCode
-from lagunhub.protocol.values import Value
+from lagunhub.protocol.values import ABSENT, Value
 from tests.node.endpoints.base import FunctionalEndpoint
 
 
@@ -32,6 +32,12 @@ class Sense(FunctionalEndpoint):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        # "Absent" until the first measurement, and a threshold without a value is
+        # inactive (types/0x0030-sense.md §5.4, §5.5) — not the zero a plain `<Q>` starts
+        # with in the base.
+        for attribute, meta in self.spec.items():
+            if meta.type == QUANTITY_TYPE:
+                self.values[attribute] = ABSENT
         self.values[QUANTITY] = int(self.quantity)
 
     def measure(self, raw: int) -> None:

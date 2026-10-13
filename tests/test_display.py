@@ -65,12 +65,14 @@ def heard(spy: VirtualBus, kind: MessageKind) -> list[Frame]:
 def test_a_number_is_a_write_and_the_view_reads_it_in_its_quantity(
     hub: Hub, screen: NodeCore
 ) -> None:
-    result = hub.api.write("kitchen-display", 4, "Value", 2137)
+    # In the quantity's units, as the view shows it (zadania/zrobione/DEVICE-01.md N12).
+    result = hub.api.write("kitchen-display", 4, "Value", 21.37)
     assert result.ok
     field = screen.endpoint(4, Display)
     assert (field.shows, field.values[0x02]) == (Content.VALUE, 2137)
     hub.inst.run(0.1, step=0.01)
-    assert attribute(hub, 4, "Value").value == 2137, "<Q> decoded by Quantity"
+    seen = attribute(hub, 4, "Value")
+    assert (seen.value, seen.label) == (2137, "21.37 °C"), "<Q> decoded by Quantity"
     assert attribute(hub, 4, "Content").label == "VALUE", "Content was reported"
 
 

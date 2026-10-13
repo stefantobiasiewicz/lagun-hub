@@ -115,9 +115,16 @@ class Reconciler:
                     f"while the configuration says {declared.name}",
                 )
                 continue
-            for element, value in description.attributes.items():
+            for element, desired in description.attributes.items():
                 meta = definition.attributes.get(element)
                 if meta is None:
+                    continue
+                try:
+                    # `26.5` °C becomes `2650` only now that the node has said what it
+                    # measures — the second phase of validation (KONFIGURACJA.md §10).
+                    value = present.on_wire(meta, desired)
+                except ValueError as exc:
+                    self._issue(node, f"ep{number}: {exc} — correct it in the configuration")
                     continue
                 reason = present.lacks(meta, value)
                 if reason is not None:
@@ -180,8 +187,10 @@ class Reconciler:
             return
 
         self.checked += 1
+        # `<Q>` travels as its quantity's type — known, or `on_wire` would have refused.
+        type_name = task.node.endpoint(endpoint).wire_type(meta) or meta.type
         try:
-            present_value = decode(meta.type, outcome.data)
+            present_value = decode(type_name, outcome.data)
         except ValueError:
             present_value = None
         if present_value == value:
@@ -196,7 +205,7 @@ class Reconciler:
             endpoint,
             meta.id,
             MessageKind.WRITE,
-            encode(meta.type, value),
+            encode(type_name, value),
             lambda result: self._wrote(task, endpoint, meta, result),
         )
 

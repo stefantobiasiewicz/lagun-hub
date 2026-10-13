@@ -25,6 +25,7 @@ from lagunhub.core.config.store import ConfigStore
 from lagunhub.core.enumeration import Enumerator
 from lagunhub.core.events import Event, EventBus, EventKind
 from lagunhub.core.model import (
+    EndpointModel,
     Installation,
     JoinRecord,
     NodeModel,
@@ -45,8 +46,11 @@ from lagunhub.core.traffic import Traffic, TrafficBus
 from lagunhub.core.transactions import Outcome, TidAllocator, TransactionManager
 from lagunhub.protocol.bus.base import Bus
 from lagunhub.protocol.endpoints import device as dev
+from lagunhub.protocol.endpoints.definition import QUANTITY_TYPE, EventDef, decode_fields
 from lagunhub.protocol.frame import Frame, decode_header
+from lagunhub.protocol.quantities import format_value
 from lagunhub.protocol.registry import TRANSACTIONAL, MessageKind, ResultCode
+from lagunhub.protocol.values import ABSENT
 
 Publish = Callable[[Snapshot], None]
 
@@ -427,6 +431,7 @@ class CoreThread(threading.Thread):
                 element=element,
                 name=meta.name if meta else f"0x{element:02X}",
                 raw=raw,
+                text=_event_text(model, meta, raw) if model and meta else "",
             )
         )
 
@@ -1024,6 +1029,30 @@ def _result_name(code: int) -> str:
         return ResultCode(code).name
     except ValueError:
         return f"0x{code:02X}"
+
+
+def _event_text(model: EndpointModel, meta: EventDef, raw: bytes) -> str:
+    """The parameters as a person reads them — `zone=ABOVE_HIGH value=26.01 °C` — after
+    the sequence number (01-model-danych.md §3.3). Empty when they do not decode: the raw
+    bytes are in the event anyway (zadania/zrobione/DEVICE-01.md N12)."""
+    quantity = model.quantity
+    try:
+        values = decode_fields(meta.params, raw[1:], quantity=quantity)
+    except ValueError:
+        return ""
+    parts = []
+    for f in meta.params:
+        value = values[f.name]
+        if isinstance(value, bool) or not isinstance(value, int):
+            shown = "absent" if value is ABSENT else str(value)
+        elif f.type == QUANTITY_TYPE and quantity is not None:
+            shown = format_value(quantity, value)
+        elif 0 <= value < len(f.names):
+            shown = f.names[value]
+        else:
+            shown = str(value)
+        parts.append(f"{f.name}={shown}")
+    return " ".join(parts)
 
 
 def _detail(frame: Frame, kind: MessageKind | None, has_header: bool) -> str:

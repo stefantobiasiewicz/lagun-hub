@@ -28,6 +28,7 @@ bugs disappears along the way: there is no second view that could drift from the
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import Future
@@ -82,6 +83,7 @@ from lagunhub.core.model import (
     NodeModel,
     NodeState,
     Uid,
+    Wanted,
 )
 from lagunhub.core.traffic import Traffic
 from lagunhub.core.transactions import Outcome
@@ -536,8 +538,8 @@ class HubApi:
                 # route onto the bus makes it a LONG_WRITE (core/hub.py).
                 self._exposed(model, meta, None, ref, endpoint)
                 return node, meta.id, self._encode_text(meta, value, model)
-            encoded = self._encode(meta, value, model)
-            self._exposed(model, meta, coerce(meta, value), ref, endpoint)
+            encoded, coerced = self._encode(meta, value, model)
+            self._exposed(model, meta, coerced, ref, endpoint)
             return node, meta.id, encoded
 
         return self._act(ref, assemble, endpoint, MessageKind.WRITE)
@@ -632,8 +634,15 @@ class HubApi:
             if not (meta.writable and meta.persist):
                 kind = "state" if not meta.writable else "a working setting"
                 raise ApiError(Problem.INVALID, f"{meta.name} is {kind}, not configuration")
+            given = value
+            if meta.in_units:
+                # A number in the file, not the string a form sends: `26.5`, which the
+                # loader reads as °C on this endpoint (KONFIGURACJA.md §7.2). A bad value
+                # is the loader's to reject, with its own words.
+                with contextlib.suppress(ApiError):
+                    given = _units(meta, value)
             try:
-                wanted = coerce(meta, value)
+                wanted = coerce(meta, value) if not meta.in_units else None
             except ValueError:
                 wanted = None  # a bad value is the loader's to reject, with its own words
             self._exposed(model, meta, wanted, ref, endpoint)
@@ -641,7 +650,7 @@ class HubApi:
             changes: list[tuple[tuple[str, ...], Any]] = []
             if not self._has_type(inst, uid, endpoint):
                 changes.append((_segments(f"{base}/type"), definition.name))
-            changes.append((_segments(f"{base}/{meta.name}"), value))
+            changes.append((_segments(f"{base}/{meta.name}"), given))
             return base, changes
 
         _, changes = self._ask(collect)
@@ -871,33 +880,39 @@ class HubApi:
         wanted_values = description.attributes if description else {}
         return tuple(
             self._attribute(
-                meta, model.attributes.get(number), wanted_values.get(number), model.lacks(meta)
+                model,
+                meta,
+                model.attributes.get(number),
+                wanted_values.get(number),
+                model.lacks(meta),
             )
             for number, meta in sorted(definition.attributes.items())
         )
 
     def _attribute(
         self,
+        model: EndpointModel,
         meta: AttributeDef,
         state: AttributeState | None,
-        wanted: Value | None,
+        wanted: Wanted | None,
         missing: str | None = None,
     ) -> AttributeView:
         value = _plain(state.value) if state else None
         if meta.type == "string" and state is not None:
             value = _text(state.raw)
+        desired, desired_label = _desired(model, meta, wanted)
         return AttributeView(
             id=meta.id,
             name=meta.name,
             type=meta.type,
             access=meta.access,
             value=value,
-            label=render(meta, state.value) if state and state.value is not None else None,
+            label=_label(model, meta, state.value if state else None),
             raw=state.raw.hex() if state else "",
             age=self._age(state),
-            wanted=_plain(wanted),
-            wanted_label=render(meta, wanted) if wanted is not None else None,
-            matches=None if wanted is None or state is None else state.value == wanted,
+            wanted=_plain(desired),
+            wanted_label=desired_label,
+            matches=None if desired is None or state is None else state.value == desired,
             choices=choices(meta),
             configurable=meta.writable and meta.persist and missing is None,
             available=missing is None,
@@ -1064,9 +1079,12 @@ class HubApi:
                         )
                         continue
                     current = model.attributes.get(element) if model else None
+                    wanted_value, wanted_label = (
+                        _desired(model, meta, desired) if model else (None, None)
+                    )
                     if current is None:
                         state = "unknown"
-                    elif current.value == desired:
+                    elif current.value == wanted_value:
                         state = "match"
                     else:
                         state = "mismatch"
@@ -1077,11 +1095,11 @@ class HubApi:
                             endpoint=number,
                             attribute=meta.name,
                             state=state,
-                            wanted=_plain(desired),
-                            wanted_label=render(meta, desired),
+                            wanted=_plain(wanted_value),
+                            wanted_label=wanted_label,
                             actual=_plain(current.value) if current else None,
-                            actual_label=render(meta, current.value)
-                            if current and current.value is not None
+                            actual_label=_label(model, meta, current.value)
+                            if model and current
                             else None,
                         )
                     )
@@ -1299,7 +1317,17 @@ class HubApi:
         except ValueError as exc:
             raise ApiError(Problem.NOT_FOUND, str(exc)) from None
 
-    def _encode(self, meta: AttributeDef, value: Any, model: EndpointModel) -> bytes:
+    def _encode(self, meta: AttributeDef, value: Any, model: EndpointModel) -> tuple[bytes, Value]:
+        """The bytes of a write and the value they carry. One in units — a threshold, a
+        display's number — is given as a person reads it, `21.37` for a temperature, the
+        same as the file and the view (zadania/zrobione/DEVICE-01.md N5, N12)."""
+        if meta.in_units:
+            type_name = _raw_type(model, meta) if meta.type == "<Q>" else meta.type
+            try:
+                coerced = model.on_wire(meta, _units(meta, value))
+            except ValueError as exc:
+                raise ApiError(Problem.INVALID, str(exc)) from None
+            return encode(type_name, coerced), coerced
         try:
             coerced = coerce(meta, value)
         except ValueError as exc:
@@ -1307,7 +1335,7 @@ class HubApi:
         type_name = meta.type if meta.type != "<Q>" else _raw_type(model, meta)
         if not in_range(type_name, coerced):
             raise ApiError(Problem.INVALID, f"{meta.name} = {coerced} is outside {type_name}")
-        return encode(type_name, coerced)
+        return encode(type_name, coerced), coerced
 
     @staticmethod
     def _encode_text(meta: AttributeDef, value: Any, model: EndpointModel) -> bytes:
@@ -1557,7 +1585,33 @@ def _traffic(item: Traffic) -> TrafficView:
     )
 
 
-def _plain(value: Value | None) -> Plain:
+def _label(model: EndpointModel, meta: AttributeDef, value: Value | None) -> str | None:
+    """How a person reads a value: `21.37 °C` for one in units, `LIGHT` for a named one.
+    "Absent" and unknown have none — the view draws `—`, never a zero
+    (types/0x0030-sense.md §7; zadania/zrobione/DEVICE-01.md N12)."""
+    if value is None:
+        return None
+    if meta.in_units:
+        return model.in_units(meta, value)
+    return render(meta, value)
+
+
+def _desired(
+    model: EndpointModel, meta: AttributeDef, wanted: Wanted | None
+) -> tuple[Value | None, str | None]:
+    """The file's value as the node would hold it, and its label. One in units the hub
+    cannot convert yet — the quantity unread, or out of its range — is shown as the
+    file says it, and compares with nothing."""
+    if wanted is None:
+        return None, None
+    try:
+        value = model.on_wire(meta, wanted)
+    except ValueError:
+        return None, f"{wanted:g}"
+    return value, _label(model, meta, value)
+
+
+def _plain(value: Wanted | None) -> Plain:
     if value is None or value is ABSENT:
         return None
     return value if isinstance(value, bool | int) else None
@@ -1609,6 +1663,16 @@ def _quantity(model: EndpointModel) -> Quantity | None:
         return Quantity(state.value)
     except ValueError:
         return None
+
+
+def _units(meta: AttributeDef, value: Any) -> float:
+    """A number in the quantity's units, from what a person or a form gave."""
+    if not isinstance(value, bool):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            pass
+    raise ApiError(Problem.INVALID, f"{meta.name} wants a number in units, not {value!r}")
 
 
 def _raw_type(model: EndpointModel, meta: AttributeDef) -> str:

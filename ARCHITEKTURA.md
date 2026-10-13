@@ -765,6 +765,23 @@ refuses a text the field cannot hold before it goes out. `<Q>` values are decode
 the model by the endpoint's `Quantity` (`core/model.py`); a string is kept as raw bytes
 and the API decodes it for the view.
 
+**Values in units** (zadania/zrobione/DEVICE-01.md N5, N12). The model keeps what the node
+holds — `2650`, steps of the quantity. A person sees and gives units — `26.5` °C — in the
+file, in the view and through the API's `write`. One rule for all three: an attribute is
+in units when it is `<Q>` or marked `physical` (`Sense.Offset`, `ThresholdHysteresis`;
+`AttributeDef.in_units`). Conversion lives in one place, `EndpointModel.on_wire` (units
+→ steps, range of the type it travels as) and `EndpointModel.in_units` (steps → label),
+because only the endpoint knows its `Quantity`: the same `20` is 2000 hundredths of a lux
+on a light and refused on nothing. The file holds a `float` until then (`Wanted`), and
+reconciliation converts it after enumeration — a value the quantity cannot carry is an
+issue, not a crash (KONFIGURACJA.md §10). "Absent" has no label and the view draws `—`,
+never a zero (types/0x0030-sense.md §7). An event's parameters get the same treatment in
+its `text` (`zone=ABOVE_HIGH value=26.01 °C`). Rejected: converting in the loader (it does
+not know the quantity), a unit suffix in the file (`26.5 °C` — a second syntax for what
+the endpoint already says), and raw steps everywhere (a person would write `2650` and
+`-50` and get one of them wrong). Common attributes stay raw — `ReportHysteresis` is in
+promille on an output and in hundredths of a degree on a sensor, and it is one attribute.
+
 ---
 
 ## 9. Warstwa magistrali
@@ -1435,9 +1452,8 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
   `GET /events` i przeładowanie na zdarzenie zrobiłoby z odpytywania siatkę
   bezpieczeństwa (`REFRESH` w [`adapters/tui/state.py`](lagunhub/adapters/tui/state.py)).
 
-- **`<Q>` values in their unit.** The view shows `Display.Value` and `Sense.Value` as the
-  raw integer (`2137`, not `21.37 °C`); the scale and unit come from `Quantity`, and
-  showing them is DEVICE-01's (`zadania/devices/DEVICE-01.md`).
+- ~~**`<Q>` values in their unit.**~~ Done in DEVICE-01: the API gives every value in
+  units a label (`21.37 °C`), the view shows it — see "Values in units" below.
 
 ---
 

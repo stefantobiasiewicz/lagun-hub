@@ -62,11 +62,13 @@ nodes:
     name: "The kitchen sensor"
     room: kitchen
     endpoints:
-      # A room sensor (types/0x0030-sense.md) — `lagun-sim env`. It reports by itself;
-      # bindings.yaml writes both values onto kitchen-display.
+      # A room sensor (types/0x0030-sense.md) — `lagun-sim env`, the board devices/apps/env.
+      # It reports by itself; bindings.yaml writes both values onto kitchen-display.
+      # Thresholds are in the quantity's units, °C here (KONFIGURACJA.md §7.2).
       4:
         type: Sense
         name: "Temperature"
+        ThresholdHigh: 26.5
       5:
         type: Sense
         name: "Humidity"

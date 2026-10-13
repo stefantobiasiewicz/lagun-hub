@@ -18,9 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Final
 
-from lagunhub.core.model import Uid
+from lagunhub.core.model import Uid, Wanted
 from lagunhub.protocol.registry import EndpointType, MessageKind
-from lagunhub.protocol.values import Value
 
 DEFAULT_BITRATE: Final = 500_000
 """W2 settled in favour of the faster one. Throughput is not a factor
@@ -87,7 +86,8 @@ class EndpointConfig:
 
     type: EndpointType | None = None
     name: str = ""
-    attributes: dict[int, Value] = field(default_factory=dict)
+    attributes: dict[int, Wanted] = field(default_factory=dict)
+    """A `float` is in the quantity's units (`Wanted`, zadania/zrobione/DEVICE-01.md N5)."""
     groups: tuple[int, ...] = ()
 
 

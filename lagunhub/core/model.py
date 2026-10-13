@@ -21,15 +21,20 @@ from typing import NewType, Protocol
 from lagunhub.protocol.endpoints import CATALOG
 from lagunhub.protocol.endpoints.definition import QUANTITY_TYPE, AttributeDef, TypeDef
 from lagunhub.protocol.frame import encode_header, encode_id
-from lagunhub.protocol.quantities import Quantity, raw_type
+from lagunhub.protocol.quantities import Quantity, format_value, from_physical, raw_type
 from lagunhub.protocol.registry import NODE_CLASS_BLOCKS, EndpointType, MessageKind, NodeClass
-from lagunhub.protocol.values import Value, decode
+from lagunhub.protocol.values import Value, decode, in_range
 
 Uid = NewType("Uid", bytes)
 """A node’s identity. An address is a route and changes; a Uid never does."""
 
 Source = tuple[Uid, int, int]
 """``(Uid, endpoint, element)`` — the triple a binding is matched by."""
+
+Wanted = Value | float
+"""A value the configuration wants. A `float` is one in the quantity's units —
+`ThresholdHigh: 26.5` — which becomes a `Value` only once the node has said what it
+measures: `EndpointModel.on_wire` (zadania/zrobione/DEVICE-01.md N5)."""
 
 
 class EndpointWanted(Protocol):
@@ -45,7 +50,7 @@ class EndpointWanted(Protocol):
     def groups(self) -> tuple[int, ...]: ...
 
     @property
-    def attributes(self) -> Mapping[int, Value]: ...
+    def attributes(self) -> Mapping[int, Wanted]: ...
 
 
 class NodeWanted(Protocol):
@@ -201,6 +206,62 @@ class EndpointModel:
     @property
     def definition(self) -> TypeDef | None:
         return CATALOG.get(self.type_id) if self.type_id is not None else None
+
+    @property
+    def quantity(self) -> Quantity | None:
+        """`Quantity` as the hub last saw it — `Sense` and `Display` alike
+        (zadania/zrobione/FEAT-12.md). It is the device's and never changes in operation
+        (types/0x0030-sense.md §2.3, types/0x0022-display.md §5.2), so a value decoded
+        once stays right. `None` before enumeration read it, and on other types."""
+        definition = self.definition
+        if definition is None:
+            return None
+        try:
+            number = definition.attribute("Quantity").id
+        except ValueError:
+            return None
+        state = self.attributes.get(number)
+        if state is None or not isinstance(state.value, int) or isinstance(state.value, bool):
+            return None
+        try:
+            return Quantity(state.value)
+        except ValueError:
+            return None
+
+    def wire_type(self, meta: AttributeDef) -> str | None:
+        """The type `meta` travels as here: `<Q>` by `Quantity`, `None` while unknown."""
+        if meta.type != QUANTITY_TYPE:
+            return meta.type
+        quantity = self.quantity
+        return raw_type(quantity) if quantity is not None else None
+
+    def on_wire(self, meta: AttributeDef, wanted: Wanted) -> Value:
+        """What a person wanted, as the node takes it. A value in units becomes steps of
+        this endpoint's quantity — `26.5` is `2650` on a temperature and `20` lx is `2000`
+        on a light — and has to fit the type it travels as. Raises `ValueError` with the
+        reason: the second phase of validation, an issue and not a crash
+        (KONFIGURACJA.md §10)."""
+        if not isinstance(wanted, float):
+            return wanted
+        quantity = self.quantity
+        type_name = self.wire_type(meta)
+        if quantity is None or type_name is None:
+            raise ValueError(f"{meta.name} is in units of a quantity the hub has not read yet")
+        raw = from_physical(quantity, wanted)
+        if not in_range(type_name, raw):
+            raise ValueError(f"{meta.name} = {wanted:g} is outside what {quantity.name} can carry")
+        return raw
+
+    def in_units(self, meta: AttributeDef, value: Value | None) -> str | None:
+        """`2137` as `21.37 °C` — or `None` when it is not a number in units, "absent"
+        included: a missing reading has no unit and is never a zero
+        (types/0x0030-sense.md §7)."""
+        quantity = self.quantity
+        if not meta.in_units or quantity is None:
+            return None
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        return format_value(quantity, value)
 
     def lacks(self, meta: AttributeDef, value: Value | None = None) -> str | None:
         """Why this endpoint cannot take `meta` (with `value`, when given) — or `None`.
@@ -545,32 +606,11 @@ def _decode(endpoint: EndpointModel, attribute: int, raw: bytes) -> Value | None
     meta = definition.attributes.get(attribute)
     if meta is None or meta.type in ("string", "blob"):
         return None  # not a `Value`; the API decodes a string from `raw` for the view
-    type_name = meta.type if meta.type != QUANTITY_TYPE else _quantity_type(endpoint)
+    type_name = endpoint.wire_type(meta)
     if type_name is None:
         return None  # `Quantity` not known yet — the bytes are kept, the number is not
     try:
         return decode(type_name, raw)
-    except ValueError:
-        return None
-
-
-def _quantity_type(endpoint: EndpointModel) -> str | None:
-    """The wire type of `<Q>` on this endpoint, from its `Quantity` as the hub last saw
-    it — `Sense` and `Display` alike (zadania/zrobione/FEAT-12.md). `Quantity` is the device's and
-    never changes in operation (types/0x0030-sense.md §2.3, types/0x0022-display.md §5.2),
-    so a value decoded once stays right."""
-    definition = endpoint.definition
-    if definition is None:
-        return None
-    try:
-        number = definition.attribute("Quantity").id
-    except ValueError:
-        return None
-    state = endpoint.attributes.get(number)
-    if state is None or not isinstance(state.value, int) or isinstance(state.value, bool):
-        return None
-    try:
-        return raw_type(Quantity(state.value))
     except ValueError:
         return None
 

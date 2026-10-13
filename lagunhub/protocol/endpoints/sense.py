@@ -8,6 +8,7 @@ an ``i16`` scaled by
 
 from __future__ import annotations
 
+from enum import IntEnum
 from typing import Final
 
 from lagunhub.protocol.endpoints.definition import AttributeDef as A
@@ -35,6 +36,14 @@ class Feature:
     THRESHOLD = 1 << 1
 
 
+class Zone(IntEnum):
+    """`zone` of the `Threshold` event (§4)."""
+
+    NORMAL = 0
+    BELOW_LOW = 1
+    ABOVE_HIGH = 2
+
+
 SENSE: Final = TypeDef(
     type_id=EndpointType.Sense,
     revision=1,
@@ -47,7 +56,8 @@ SENSE: Final = TypeDef(
         MAX_MEASURED: A(
             MAX_MEASURED, "MaxMeasured", "<Q>", "RO", persist=True, feature=Feature.MIN_MAX
         ),
-        OFFSET: A(OFFSET, "Offset", "i16", "RW", persist=True, optional=True),
+        # An `i16` whatever the quantity, but in its units (§5.1): `-50` is half a degree.
+        OFFSET: A(OFFSET, "Offset", "i16", "RW", persist=True, optional=True, physical=True),
         THRESHOLD_LOW: A(
             THRESHOLD_LOW, "ThresholdLow", "<Q>", "RW", persist=True, feature=Feature.THRESHOLD
         ),
@@ -61,6 +71,7 @@ SENSE: Final = TypeDef(
             "RW",
             persist=True,
             feature=Feature.THRESHOLD,
+            physical=True,  # in the quantity's units, as the thresholds it widens
             # Optional within the feature (CR-04): it guards against the sensor's own
             # noise, which its author knows; the thresholds themselves are use and stay
             # mandatory (types/0x0030-sense.md §5.4).
@@ -68,5 +79,11 @@ SENSE: Final = TypeDef(
         ),
     },
     commands={RESET_MIN_MAX: C(RESET_MIN_MAX, "ResetMinMax", feature=Feature.MIN_MAX)},
-    events={THRESHOLD: E(THRESHOLD, "Threshold", (F("zone", "enum8"), F("value", "<Q>")))},
+    events={
+        THRESHOLD: E(
+            THRESHOLD,
+            "Threshold",
+            (F("zone", "enum8", names=tuple(z.name for z in Zone)), F("value", "<Q>")),
+        )
+    },
 )

@@ -34,7 +34,7 @@ from lagunhub.core.config.model import (
     SourceRef,
     TargetRef,
 )
-from lagunhub.core.model import Uid
+from lagunhub.core.model import Uid, Wanted
 from lagunhub.protocol.endpoints import by_name
 from lagunhub.protocol.endpoints.definition import AttributeDef, encode_fields
 from lagunhub.protocol.endpoints.enums import coerce
@@ -320,7 +320,7 @@ def _endpoint(
     alias: str, number: int, raw: dict[str, Any], groups: dict[int, GroupConfig]
 ) -> EndpointConfig:
     type_name = by_name(str(raw["type"])) if "type" in raw else None
-    attributes: dict[int, Value] = {}
+    attributes: dict[int, Wanted] = {}
     for name, value in raw.items():
         if name in ("type", "name", "groups"):
             continue
@@ -351,7 +351,7 @@ def _attribute(type_name: str, meta: AttributeDef, alias: str, number: int) -> A
     return meta
 
 
-def _system_stays_enabled(meta: AttributeDef, value: Value, alias: str, number: int) -> None:
+def _system_stays_enabled(meta: AttributeDef, value: Wanted, alias: str, number: int) -> None:
     """A system endpoint is always enabled — the node answers `Enabled = 0` with
     `INVALID_VALUE` (01-model-danych.md §4.1).
 
@@ -364,7 +364,9 @@ def _system_stays_enabled(meta: AttributeDef, value: Value, alias: str, number: 
         )
 
 
-def _value(meta: AttributeDef, raw: Any, alias: str, number: int) -> Value:
+def _value(meta: AttributeDef, raw: Any, alias: str, number: int) -> Wanted:
+    if meta.in_units:
+        return _in_units(meta, raw, alias, number)
     value = _enum_or_number(meta, raw, alias, number)
     spec = SCALARS.get(meta.type)
     if spec is not None and isinstance(value, int) and not isinstance(value, bool):
@@ -373,6 +375,22 @@ def _value(meta: AttributeDef, raw: Any, alias: str, number: int) -> Value:
         if not lo <= value <= hi:
             raise ConfigError(f"{alias} ep{number}: {meta.name} = {value} is outside {lo}…{hi}")
     return value
+
+
+def _in_units(meta: AttributeDef, raw: Any, alias: str, number: int) -> float:
+    """`ThresholdHigh: 26.5` — a number in the units of the endpoint's quantity, which
+    the file does not know: what `26.5` is on the wire, and whether it fits, is settled
+    after enumeration (`EndpointModel.on_wire`; KONFIGURACJA.md §7.2, §10). Here only
+    that it is a number — a word is a typo the hub refuses to start with."""
+    if not isinstance(raw, bool):
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            pass
+    raise ConfigError(
+        f"{alias} ep{number}: {meta.name} = {raw!r} is not a number in the units of the "
+        "endpoint's quantity"
+    )
 
 
 def _enum_or_number(meta: AttributeDef, raw: Any, alias: str, number: int) -> Value:

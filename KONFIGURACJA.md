@@ -420,6 +420,38 @@ Warto stąd jeden wniosek na przyszłość: **`ReportInterval` prosi się o wart
 w `hub.yaml`**, nadpisywaną per endpoint — bo ustawia się ją dla wszystkiego naraz, a nie
 dla pojedynczego klawisza. Nie robimy tego teraz; odnotowane jako **K6**.
 
+### 7.2 Values in the quantity's units
+
+Thresholds of a sensor, its `Offset` and `ThresholdHysteresis` are written **in the units
+of the quantity the endpoint measures**, not in the steps the bus carries
+(`zadania/zrobione/DEVICE-01.md` N5):
+
+```yaml
+  kitchen-env:
+    endpoints:
+      4:                        # TEMPERATURE: °C
+        type: Sense
+        ThresholdHigh: 26.5     # 2650 on the bus
+        ThresholdLow: 18
+        ThresholdHysteresis: 0.5
+        Offset: -0.5            # an i16 of −50, half a degree down
+      6:                        # ILLUMINANCE: lx
+        type: Sense
+        ThresholdLow: 20        # 2000 hundredths of a lux, four bytes
+```
+
+What `26.5` is on the bus the file cannot know — the quantity is the node's, read at
+enumeration. So the first phase of validation (§10) checks only that it is a number; the
+conversion, and whether the quantity's type can carry it, come in the second phase, and a
+value that does not fit is an issue on that node, not a hub that will not start. The view
+and the API speak the same units (`21.37 °C`; a write of `ThresholdLow` takes `17.5`).
+
+The **common** attributes stay in steps: `ReportHysteresis: 20` is 0.20 °C on a
+temperature and two promille on an output. It is one attribute across every type, and
+units would make it mean something different on each. A threshold cannot be cleared
+from the file: an attribute missing from the file is not touched (§7), and "absent" has
+no spelling here yet.
+
 ---
 
 ## 8. Uzgadnianie z węzłami
