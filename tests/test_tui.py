@@ -28,6 +28,7 @@ from lagunhub.api import (
     BusView,
     ChangeView,
     CommissioningView,
+    ConfigView,
     HealthView,
     JoinView,
     NodeSummary,
@@ -418,22 +419,28 @@ class TestOverlays:
         assert expanded.overlay is None
         assert "is state" in expanded.status
 
-    def test_confirmation_requires_retyping_the_name(self) -> None:
+    def test_a_confirmation_asks_for_no_typing(self) -> None:
+        """`⏎` carries it out, `Esc` backs out, nothing else does anything — the window
+        names its target, and the key that opened it was another one (zadania/zrobione/CR-07.md)."""
         performed: list[Any] = []
         window = overlay.Confirm(
             title="Are you sure?",
             lines_before=("it will erase everything",),
-            expect="kitchen-relay",
+            accept="reset",
             on_accept=performed.append,
         )
-        for sign in "kitchen":
-            window.key(ord(sign))
-        assert window.key(10) is True, "too early — the window stays"
+        assert window.lines()[-1] == "⏎ reset      Esc cancel"
+        for sign in "kitchen-relay q":
+            assert window.key(ord(sign)) is True, "a letter is not an answer"
         assert not performed
-        for sign in "-relay":
-            window.key(ord(sign))
         assert window.key(10) is False
-        assert performed == ["kitchen-relay"]
+        assert len(performed) == 1
+
+    def test_esc_confirms_nothing(self) -> None:
+        performed: list[Any] = []
+        window = overlay.Confirm(title="t", lines_before=(), on_accept=performed.append)
+        assert window.key(27) is False
+        assert not performed
 
     def test_esc_closes_without_saving(self) -> None:
         saved: list[Any] = []
@@ -753,7 +760,7 @@ class TestBindings:
         app.key(state, ord("+"))
         assert "give one with [N]" in state.status
 
-    def test_removal_requires_retyping_the_alias(self, state: State) -> None:
+    def test_removal_is_one_window_and_enter(self, state: State) -> None:
         state.section = Section.BINDINGS
         state.snapshot = replace(
             state.snapshot,
@@ -766,9 +773,15 @@ class TestBindings:
                 ),
             ),
         )
+        entry = {"from": {"node": "hall-switch", "endpoint": 4}, "to": {"node": "x"}}
+        fake = _fake(state)
+        fake.config = lambda: ConfigView(etag="sha256:aaa", document={"bindings": [entry]})  # type: ignore[method-assign]
         app.key(state, ord("-"))
         assert isinstance(state.overlay, overlay.Confirm)
-        assert state.overlay.expect == "hall-switch"
+        assert any("hall-switch ep4" in line for line in state.overlay.lines())
+        app.key(state, 10)
+        _run(state)
+        assert ("config_set", ("bindings", [], "sha256:aaa")) in fake.calls
 
 
 class TestKeys:
@@ -866,13 +879,17 @@ class TestStrangers:
         _run(state)
         assert ("admit", (0xAABBCCDD,)) in _fake(state).calls
 
-    def test_x_resets_only_after_the_short_id_is_retyped(self, state: State) -> None:
+    def test_x_resets_after_enter_and_esc_does_not(self, state: State) -> None:
+        """The one action neither the hub nor the file can undo — guarded as removing a
+        node is, by a window that names it, not by retyping the ShortId (CR-07, K2)."""
         self.joining(state, JoinView(0xAABBCCDD, "CONTROL", address=0x040, state="PENDING"))
         app.key(state, ord("X"))
+        assert isinstance(state.overlay, overlay.Confirm)
+        assert any("AABBCCDD" in line for line in state.overlay.lines())
+        app.key(state, 27)
         _run(state)
         assert not any(call[0] == "factory_reset" for call in _fake(state).calls)
-        for letter in "AABBCCDD":
-            app.key(state, ord(letter))
+        app.key(state, ord("X"))
         app.key(state, 10)
         _run(state)
         assert ("factory_reset", (0xAABBCCDD,)) in _fake(state).calls
@@ -1091,15 +1108,14 @@ class TestBuses:
         assert row.colour == panes.BAD
         assert panes.details(state).note[0] == fault
 
-    def test_u_reconciles_only_after_the_name_is_retyped(self, state: State) -> None:
-        """Reconciling takes the bus down for a moment — the weight of a factory reset."""
+    def test_u_reconciles_after_enter(self, state: State) -> None:
+        """Reconciling takes the bus down for a moment — one window that says so, then
+        `⏎` (CR-07)."""
         self.buses(state)
         app.key(state, ord("u"))
         assert isinstance(state.overlay, overlay.Confirm)
         _run(state)
         assert ("bus_apply", ("socketcan", "ground-floor")) not in _fake(state).calls
-        for letter in "ground-floor":
-            app.key(state, ord(letter))
         app.key(state, 10)
         _run(state)
         assert ("bus_apply", ("socketcan", "ground-floor")) in _fake(state).calls

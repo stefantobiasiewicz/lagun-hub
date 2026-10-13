@@ -240,14 +240,15 @@ def _admit(state: State) -> None:
 
 
 def _factory_reset(state: State) -> None:
-    """Irreversible for the node — so confirmed by retyping, like removing a binding."""
+    """Irreversible for the node — one window that names it, then `⏎`, as removing a
+    node (zadania/zrobione/CR-07.md, K2: the same effect, the same guard)."""
     row = _stranger(state)
     if row is None:
         state.say("! choose a PENDING node that has an address")
         return
     name = f"{row.short_id:08X}"
 
-    def carry_out(_: str) -> None:
+    def carry_out(_: Any) -> None:
         def task() -> str:
             result = state.hub.factory_reset(row.short_id)
             state.reload()
@@ -258,11 +259,12 @@ def _factory_reset(state: State) -> None:
     state.overlay = overlay.Confirm(
         title="Reset to factory settings?",
         lines_before=(
-            f"The node at 0x{row.address:03X} forgets its address and everything a person",
-            "set on it, then announces itself like a new device.",
+            f"ShortId 0x{name} · address 0x{row.address:03X}",
+            "",
+            "The node forgets its address and everything a person set on it,",
+            "then announces itself like a new device.",
         ),
-        expect=name,
-        prompt="type the ShortId to confirm:",
+        accept="reset",
         on_accept=carry_out,
     )
 
@@ -283,9 +285,8 @@ def _remove_node(state: State) -> None:
     """Forget a node: the hub, the file and its bindings (06-cykl-zycia-urzadzenia.md §6).
 
     One window: choosing the mode **is** the confirmation, `Esc` backs out. No retyping
-    of the alias, unlike the factory reset of a stranger — the user found it pointless
-    here (zadania/zrobione/FEAT-04.md): the node is named in the window, and an ordinary removal
-    does nothing until the node itself confirms.
+    of the alias — the user found it pointless (zadania/zrobione/FEAT-04.md), and since
+    CR-07 no confirmation in the view asks for typing.
     """
     ref = state.node_ref()
     if ref is None:
@@ -490,7 +491,7 @@ def _u(state: State) -> None:
 
 
 def _bus_apply(state: State) -> None:
-    """Reconcile a bus with the file — confirmed by retyping its name.
+    """Reconcile a bus with the file — one window that says what will run, then `⏎`.
 
     The same weight as a factory reset: `ip link set … down/up` is a moment without a bus,
     and every node on it stops answering for that moment (makiety, screen 12).
@@ -500,7 +501,7 @@ def _bus_apply(state: State) -> None:
         state.say("! there is nothing the hub can reconcile here")
         return
 
-    def carry_out(_: str) -> None:
+    def carry_out(_: Any) -> None:
         def task() -> str:
             view = state.hub.bus_apply(bus.kind, bus.name)
             state.reload()
@@ -521,8 +522,7 @@ def _bus_apply(state: State) -> None:
             f"The bus goes down for a moment; {bus.nodes} node(s) on it stop answering",
             "and bindings across it do not fire until it is back.",
         ),
-        expect=bus.name,
-        prompt="type the bus name to confirm:",
+        accept="reconcile",
         on_accept=carry_out,
     )
 

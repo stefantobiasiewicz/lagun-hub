@@ -996,9 +996,10 @@ Rozstrzygnięcia z pisania widoku:
 | reading everything | `G`, a capital `g`; inside an endpoint only that one | the same split as `g` against `R`: the key under the cursor's scope. Progress shows in the pane title, because the view polls rather than listens (§14.5) |
 | `p` — przyjmij wartość z węzła do pliku | **jest, ale tylko jawnie** | łamie zasadę „plik → węzeł, nigdy odwrotnie", więc wolno tylko człowiekowi; bez tego jedyną drogą jest ręczna edycja pliku |
 | ręczne wyzwolenie powiązania | **nie ma** | nowa operacja w API, a w dzienniku trudna do odróżnienia od prawdziwego zdarzenia |
-| komendy z argumentami w powiązaniu | tylko bezargumentowe | argumenty dokłada się w pliku |
 | wąskie okno | najpierw skracają się nazwy sekcji, potem kolumny; za małe mówi o tym | każdy rozmiar okna da się narysować |
 | kolor | **powtarza** to, co napisane słowem | nigdy nie niesie treści sam |
+| confirming something irreversible (`X` reset/remove, `-` a binding, `u` a bus) | **one window that names the target, `⏎` carries it out, `Esc` cancels — never typing** (`overlay.Confirm`, zadania/zrobione/CR-07.md) | two different keys and a named target are the guard; retyping a name the window already shows was a typing exercise, and a ShortId in hex easy to get wrong. The same guard for a stranger's factory reset as for removing a node, which ends in one too |
+| commands with arguments in a binding | only argumentless ones; report → write is offered too, from lists (§3.3) | arguments go in the file |
 
 **Czego widok jeszcze nie pokazuje, bo hub tego nie liczy** — w tych miejscach stoi
 kreska, **lepiej kreska niż zmyślona liczba**: kiedy węzeł był ostatnio słyszany (próg

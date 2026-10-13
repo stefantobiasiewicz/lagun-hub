@@ -11,14 +11,18 @@ Two kinds of editing, because there are two kinds of value
 | a number | typed in, with the range printed above the field |
 | named | **chosen from a list**, because names are not guessed — `choices` comes from the hub |
 
-Confirmation is separate and deliberately awkward: `FactoryReset` erases everything in
-a node that the hub cannot restore, so one accidental keypress must not do it.
+**A confirmation never asks for typing** (zadania/zrobione/CR-07.md). It names what will
+happen and to what, and waits for `⏎`; `Esc` backs out, any other key does nothing. The
+guard against an accident is two different keys — `X`, `-` or `u` to open it, `⏎` to
+carry it out — and a window that says what it is about, the same guard removing a node
+has had since FEAT-04. Retyping a name the window already shows was rejected: it is a
+typing exercise, not a decision, and a ShortId in hex is easy to get wrong.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 Accept = Callable[[Any], None]
@@ -106,35 +110,24 @@ class Choose:
 
 @dataclass
 class Confirm:
-    """Confirmation by **retyping the name**. Deliberately awkward."""
+    """Something irreversible, named, before it happens. `⏎` carries it out, `Esc`
+    cancels, nothing else does anything."""
 
     title: str
     lines_before: tuple[str, ...]
-    expect: str
     on_accept: Accept
-    buffer: str = ""
-    prompt: str = "type the name to confirm:"
-    _wrong: bool = field(default=False)
+    accept: str = "carry it out"
+    """What `⏎` does, in the last line — `reset`, `remove` — as `Choose.accept`."""
 
     def lines(self) -> Sequence[str]:
-        tail = "⏎ carry it out      Esc cancel"
-        if self._wrong:
-            tail = f"that is not \u201c{self.expect}\u201d — {tail}"
-        return [*self.lines_before, "", self.prompt, f"  {self.buffer}▏", "", tail]
+        return [*self.lines_before, "", f"⏎ {self.accept}      Esc cancel"]
 
     def key(self, key_sim: int) -> bool:
         if key_sim == 27:
             return False
         if key_sim in (10, 13):
-            if self.buffer == self.expect:
-                self.on_accept(self.buffer)
-                return False
-            self._wrong = True
-            return True
-        if key_sim in (263, 127, 8):
-            self.buffer = self.buffer[:-1]
-        elif 32 <= key_sim < 127:
-            self.buffer += chr(key_sim)
+            self.on_accept(None)
+            return False
         return True
 
 

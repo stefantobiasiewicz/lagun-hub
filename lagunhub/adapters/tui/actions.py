@@ -389,8 +389,7 @@ def remove_binding(state: State, alias: str, endpoint: int) -> None:
             "",
             "The file is written at once; the nodes lose nothing.",
         ),
-        expect=alias,
-        prompt="type the source alias to confirm:",
+        accept="remove",
         on_accept=carry_out,
     )
 
