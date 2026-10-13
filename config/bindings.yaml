@@ -49,3 +49,23 @@ bindings:
     endpoint: 6
     type: Display
     attribute: Value
+- from:
+    node: kitchen-env
+    endpoint: 4
+    type: Sense
+    attribute: Value
+  to:
+    node: kitchen-epd
+    endpoint: 4
+    type: Display
+    attribute: Value
+- from:
+    node: kitchen-env
+    endpoint: 5
+    type: Sense
+    attribute: Value
+  to:
+    node: kitchen-epd
+    endpoint: 5
+    type: Display
+    attribute: Value

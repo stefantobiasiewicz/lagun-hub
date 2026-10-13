@@ -57,13 +57,30 @@ nodes:
       6:
         type: Display
         name: "Humidity or a short text"
+  "3031323334353637":
+    alias: kitchen-epd
+    name: "The kitchen e-paper"
+    room: kitchen
+    endpoints:
+      # The e-paper of segment digits — `lagun-sim epd`, the board devices/apps/epd
+      # (zadania/zrobione/DEVICE-04.md). Numbers only, −9.9…199.9 °C and 0.0…99.9 %; a
+      # change reaches the glass at most once a minute, so the board can lag the sensor.
+      4:
+        type: Display
+        name: "Temperature"
+        ContentTimeout: 600     # s without a new value, then dashes; 0 = never
+      5:
+        type: Display
+        name: "Humidity"
+        ContentTimeout: 600
   "2021222324252627":
     alias: kitchen-env
     name: "The kitchen sensor"
     room: kitchen
     endpoints:
       # A room sensor (types/0x0030-sense.md) — `lagun-sim env`, the board devices/apps/env.
-      # It reports by itself; bindings.yaml writes both values onto kitchen-display.
+      # It reports by itself; bindings.yaml writes both values onto kitchen-display and
+      # onto kitchen-epd.
       # Thresholds are in the quantity's units, °C here (KONFIGURACJA.md §7.2).
       4:
         type: Sense
