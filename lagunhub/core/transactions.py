@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from lagunhub.core.schedule import Handle, Schedule
+from lagunhub.core.segments import split
 from lagunhub.protocol.frame import TID_MASK, Frame, decode_header, encode_header
 from lagunhub.protocol.registry import RETRYABLE, ResultCode
 
@@ -121,6 +122,11 @@ class Pending:
     attempts: int = 1
     on_done: Callable[[Outcome], None] | None = None
     timer: Handle | None = None
+    segments: tuple[bytes, ...] = ()
+    """A `LONG_WRITE`: the payloads of every segment, sent as one request and repeated
+    whole (05-mapowanie-can.md §6.6). Empty for an ordinary request, whose `payload` is
+    the one frame."""
+
     awaiting_segments: bool = False
     """The reply came with the `SEGMENTED` code, that is, an announcement rather than a
     result.
@@ -187,6 +193,43 @@ class TransactionManager:
         return self.track(
             bus, can_id, bytes([encode_header(tid)]) + args, tid, on_done=on_done, send=True
         )
+
+    def request_long(
+        self,
+        bus: int,
+        can_id: int,
+        value: bytes,
+        *,
+        on_done: Callable[[Outcome], None] | None = None,
+    ) -> Pending:
+        """A write of a value that never travels in one frame — a `LONG_WRITE`.
+
+        **Still one transaction** (04-interakcje.md §4): one `Tid`, every segment sent at
+        once, and the node answers once, after the LAST, with an ordinary `RESPONSE`. Its
+        identifier differs from the segments' only in kind, so the key matches as it does
+        for every reply. The hundred milliseconds count from the sending; a node that lost
+        a segment says nothing (it drops the value), so silence is the cue to repeat — the
+        **whole** value, never the missing piece (§6.6). `BUSY`, the node assembling another
+        value, is retried like any `BUSY`.
+        """
+        tid = self.tids.next(can_id)
+        segments = tuple(split(value, tid))
+        now = self._clock()
+        pending = Pending(
+            bus=bus,
+            can_id=can_id,
+            payload=segments[0],
+            tid=tid,
+            started=now,
+            on_done=on_done,
+            segments=segments,
+        )
+        self._pending[pending.key] = pending
+        self._closed.pop(pending.key, None)
+        self.opened += 1
+        self._send_all(pending)
+        pending.timer = self._schedule.after(now, TIMEOUT, lambda: self._expire(pending))
+        return pending
 
     def track(
         self,
@@ -324,8 +367,12 @@ class TransactionManager:
         self.retried += 1
         self._pending[pending.key] = pending
         now = self._clock()
-        self._send(pending.bus, Frame(pending.can_id, pending.payload))
+        self._send_all(pending)
         pending.timer = self._schedule.after(now, TIMEOUT, lambda: self._expire(pending))
+
+    def _send_all(self, pending: Pending) -> None:
+        for payload in pending.segments or (pending.payload,):
+            self._send(pending.bus, Frame(pending.can_id, payload))
 
     def _finish(self, pending: Pending, code: ResultCode | None, data: bytes) -> None:
         self._closed[pending.key] = Asked(

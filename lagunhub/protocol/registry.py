@@ -91,6 +91,7 @@ class EndpointType(IntEnum):
     ToggleInput = 0x13  # a two-state input whose state the node itself maintains; usually with a status LED
     Output = 0x20  # a driven output
     Cover = 0x21  # a blind, shutter or awning - position and slat angle
+    Display = 0x22  # one field of a display - a number with a unit, or text, written by the hub
     Sense = 0x30  # an analogue measurement of a continuous quantity
     Meter = 0x31  # a cumulative meter - energy, water, gas; the value never decreases
     Thermostat = 0x40  # temperature control for one circuit; the first type with inputs
@@ -117,6 +118,7 @@ TYPE_REVISION: dict[EndpointType, int] = {
     EndpointType.Contact: 1,
     EndpointType.ToggleInput: 1,
     EndpointType.Output: 1,
+    EndpointType.Display: 1,
     EndpointType.Sense: 1,
     EndpointType.Meter: 1,
     EndpointType.Thermostat: 1,

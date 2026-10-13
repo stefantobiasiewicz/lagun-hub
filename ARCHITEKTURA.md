@@ -712,6 +712,30 @@ jest zapowiedzią, nie wynikiem, więc transakcja trwa dalej, a jej czasu pilnuj
 chwili reasembler. Utrata segmentów powtarza **całe żądanie**, w ramach tych samych
 trzech prób.
 
+### 8.2 The other direction: `LONG_WRITE`
+
+The first attribute that is both a string and writable is `Display.Text`
+([`types/0x0022-display.md`](../lagunbus-spec/types/0x0022-display.md);
+`zadania/zrobione/FEAT-12.md`). **The form of a write is decided in one place** — `CoreThread._transact`,
+the hub's only route onto the bus — and by the attribute's type, not by the value's
+length: a `string` always goes as `LONG_WRITE`, however short, and nothing else ever does
+(`02-typy-danych.md` §2.2). An API write, a reconciliation and, one day, a binding
+(FEAT-13) therefore write a text the same way.
+
+`TransactionManager.request_long` is still one transaction: one `Tid`, every segment
+sent at once, one ordinary `RESPONSE` after the node has the LAST. Its key is the one
+every reply has (the identifier without the kind), so nothing else in the manager changes.
+A node that lost a segment drops the value and says nothing, so the hundred milliseconds
+run out and **the whole value** goes again; `BUSY` (the node assembling another value)
+is retried like any `BUSY`.
+
+Enumeration reads the type's declarations — `Quantity`, `TextLength` — next to the four
+descriptor attributes (`06-cykl-zycia-urzadzenia.md` §3.1): without `Quantity` the hub can
+neither encode a `Display.Value` nor decode a `Sense.Value`, and with `TextLength` the API
+refuses a text the field cannot hold before it goes out. `<Q>` values are decoded into
+the model by the endpoint's `Quantity` (`core/model.py`); a string is kept as raw bytes
+and the API decodes it for the view.
+
 ---
 
 ## 9. Warstwa magistrali
@@ -1380,6 +1404,10 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
   dwie sekundy później, bo dolny panel czyta `frames()`, a nie `stream()`. Słuchanie
   `GET /events` i przeładowanie na zdarzenie zrobiłoby z odpytywania siatkę
   bezpieczeństwa (`REFRESH` w [`adapters/tui/state.py`](lagunhub/adapters/tui/state.py)).
+
+- **`<Q>` values in their unit.** The view shows `Display.Value` and `Sense.Value` as the
+  raw integer (`2137`, not `21.37 °C`); the scale and unit come from `Quantity`, and
+  showing them is DEVICE-01's (`zadania/devices/DEVICE-01.md`).
 
 ---
 

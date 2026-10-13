@@ -697,6 +697,7 @@ RANGES: Final[dict[str, str]] = {
     "i32": "−2147483648…2147483647",
     "map8": "a bit mask, 0…255",
     "map16": "a bit mask, 0…65535",
+    "string": "text, UTF-8 — the field's TextLength counts bytes, `ż` is two",
 }
 
 
@@ -727,11 +728,16 @@ def _question(
             note=note,
         )
     span = RANGES.get(type_name)
+    # A text goes as typed: `yes` is a word on a display, not `True`, and `30` is two
+    # characters, not a number (types/0x0022-display.md §5.3).
+    take = (
+        (lambda w: on_accept(str(w))) if type_name == "string" else (lambda w: on_accept(_value(w)))
+    )
     return overlay.Edit(
         title=title,
         subject=subject,
         hint=f"{type_name}" + (f" · {span}" if span else "") + f" · now: {now or '—'}",
-        on_accept=lambda w: on_accept(_value(w)),
+        on_accept=take,
         buffer=now if now and now != "—" else "",
         note=note,
     )

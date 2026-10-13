@@ -121,6 +121,8 @@ class Endpoint:
             return ResultCode.UNSUPPORTED_FEATURE
         if not meta.writable:
             return ResultCode.READ_ONLY
+        if meta.type in ("string", "blob"):
+            return ResultCode.INVALID_VALUE  # a string never travels in a WRITE (02 §2.2)
         carrying = self.kind_of(meta)
         try:
             value = decode(carrying, data)
@@ -137,6 +139,21 @@ class Endpoint:
         if meta.reported:
             self.report(attribute)  # a write causes a report (04-interakcje.md §4.2)
         return ResultCode.OK
+
+    def write_long(self, attribute: int, value: bytes) -> ResultCode:
+        """A value that came in segments (05-mapowanie-can.md §6): the checks of
+        04-interakcje.md §4, then the form — only a string travels so, and its prefix has
+        to say exactly the bytes that follow (02-typy-danych.md §2.2, §6.6)."""
+        meta = self.spec.get(attribute)
+        if meta is None:
+            return ResultCode.UNSUPPORTED_ELEMENT
+        if not self.has(meta.feature):
+            return ResultCode.UNSUPPORTED_FEATURE
+        if not meta.writable:
+            return ResultCode.READ_ONLY
+        if meta.type != "string" or not value or value[0] != len(value) - 1:
+            return ResultCode.INVALID_VALUE
+        return self.on_write_long(attribute, value)
 
     @staticmethod
     def _within_bounds(meta: AttributeDef, value: Value) -> bool:
@@ -177,6 +194,11 @@ class Endpoint:
         return None
 
     def on_write(self, attribute: int, value: Value) -> None: ...
+
+    def on_write_long(self, attribute: int, value: bytes) -> ResultCode:
+        """A whole string for a type to keep. A type with no writable string never
+        gets here — the checks above stop it."""
+        return ResultCode.FAILURE
 
     def tick(self, now: float) -> None: ...
 

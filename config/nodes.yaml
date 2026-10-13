@@ -39,3 +39,21 @@ nodes:
   a201020304050607:
     name: test
     alias: test
+  "1011121314151617":
+    alias: kitchen-display
+    name: "The kitchen display"
+    room: kitchen
+    endpoints:
+      # A display field shows what the hub writes (types/0x0022-display.md). Value and
+      # Text are working values — `w` in the view or PUT …/attributes/Value — not
+      # configuration; only how long content stays is a setting.
+      4:
+        type: Display
+        name: "Temperature"
+        ContentTimeout: 600     # s without a new value, then dashes; 0 = never
+      5:
+        type: Display
+        name: "Message line"    # 16 bytes; keeps its own 120 s
+      6:
+        type: Display
+        name: "Humidity or a short text"

@@ -558,15 +558,35 @@ class CoreThread(threading.Thread):
         on_done: Callable[[Outcome], None] | None = None,
     ) -> None:
         """The hub’s only route onto the bus — and therefore the only place where a
-        successful reply reaches the model."""
+        successful reply reaches the model.
+
+        Also the one place that decides **the form of a write**: a `string` attribute
+        always goes as `LONG_WRITE`, however short, and nothing else ever does
+        (02-typy-danych.md §2.2). By the attribute's type, not by the value's length —
+        so an API call, a reconciliation and a binding write a text the same way.
+        """
         from lagunhub.protocol.frame import encode_id
 
+        remembering = self._remembering(bus, address, endpoint, element, kind, args, on_done)
+        if kind == MessageKind.WRITE and self._is_string(address, endpoint, element):
+            self.transactions.request_long(
+                bus,
+                encode_id(MessageKind.LONG_WRITE, address, endpoint, element),
+                args,
+                on_done=remembering,
+            )
+            return
         self.transactions.request(
-            bus,
-            encode_id(kind, address, endpoint, element),
-            args,
-            on_done=self._remembering(bus, address, endpoint, element, kind, args, on_done),
+            bus, encode_id(kind, address, endpoint, element), args, on_done=remembering
         )
+
+    def _is_string(self, address: int, endpoint: int, element: int) -> bool:
+        uid = self.installation.by_address.get(address)
+        node = self.installation.nodes.get(uid) if uid is not None else None
+        model = node.endpoints.get(endpoint) if node is not None else None
+        definition = model.definition if model is not None else None
+        meta = definition.attributes.get(element) if definition is not None else None
+        return meta is not None and meta.type == "string"
 
     def _read(
         self,

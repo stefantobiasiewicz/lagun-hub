@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="0b · Stack: hub + display" type="CompoundRunConfigurationType">
+    <toRun name="1 · Hub (UDP, simulators)" type="PythonConfigurationType" />
+    <toRun name="3c · Sim: kitchen-display (display)" type="PythonConfigurationType" />
+    <method v="2" />
+  </configuration>
+</component>

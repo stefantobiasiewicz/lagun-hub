@@ -19,8 +19,9 @@ from enum import Enum, auto
 from typing import NewType, Protocol
 
 from lagunhub.protocol.endpoints import CATALOG
-from lagunhub.protocol.endpoints.definition import AttributeDef, TypeDef
+from lagunhub.protocol.endpoints.definition import QUANTITY_TYPE, AttributeDef, TypeDef
 from lagunhub.protocol.frame import encode_header, encode_id
+from lagunhub.protocol.quantities import Quantity, raw_type
 from lagunhub.protocol.registry import NODE_CLASS_BLOCKS, EndpointType, MessageKind, NodeClass
 from lagunhub.protocol.values import Value, decode
 
@@ -541,10 +542,34 @@ def _decode(endpoint: EndpointModel, attribute: int, raw: bytes) -> Value | None
     if definition is None:
         return None
     meta = definition.attributes.get(attribute)
-    if meta is None or meta.type in ("string", "blob", "<Q>"):
+    if meta is None or meta.type in ("string", "blob"):
+        return None  # not a `Value`; the API decodes a string from `raw` for the view
+    type_name = meta.type if meta.type != QUANTITY_TYPE else _quantity_type(endpoint)
+    if type_name is None:
+        return None  # `Quantity` not known yet — the bytes are kept, the number is not
+    try:
+        return decode(type_name, raw)
+    except ValueError:
+        return None
+
+
+def _quantity_type(endpoint: EndpointModel) -> str | None:
+    """The wire type of `<Q>` on this endpoint, from its `Quantity` as the hub last saw
+    it — `Sense` and `Display` alike (zadania/zrobione/FEAT-12.md). `Quantity` is the device's and
+    never changes in operation (types/0x0030-sense.md §2.3, types/0x0022-display.md §5.2),
+    so a value decoded once stays right."""
+    definition = endpoint.definition
+    if definition is None:
         return None
     try:
-        return decode(meta.type, raw)
+        number = definition.attribute("Quantity").id
+    except ValueError:
+        return None
+    state = endpoint.attributes.get(number)
+    if state is None or not isinstance(state.value, int) or isinstance(state.value, bool):
+        return None
+    try:
+        return raw_type(Quantity(state.value))
     except ValueError:
         return None
 

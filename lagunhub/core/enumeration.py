@@ -68,6 +68,19 @@ transaction at the cost of a branch in a procedure that runs once in a device’
 (06-cykl-zycia-urzadzenia.md §3.1)."""
 
 
+DECLARATIONS: Final[tuple[str, ...]] = ("Quantity", "TextLength")
+"""06-cykl-zycia-urzadzenia.md §3.1, the declarations. Attributes of a type that
+**describe** an endpoint rather than its state: fixed by
+the device, read-only, never changing in operation. Read with the descriptor once the
+endpoint's type is known.
+
+`Quantity` because without it `<Q>` cannot be decoded or encoded at all — a `Sense`
+value or a `Display` write (types/0x0030-sense.md §2.3, types/0x0022-display.md §5.2).
+`TextLength` so that the hub refuses a text the field cannot hold before sending it
+(§5.3). One read each, once in a device's life; a field without the feature answers
+`UNSUPPORTED_FEATURE`, which is a normal answer here (zadania/zrobione/FEAT-12.md)."""
+
+
 @dataclass
 class Job:
     """One identification in progress."""
@@ -183,8 +196,10 @@ class Enumerator:
         count = int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
         if endpoint == 0:
             job.device[element] = count
-        else:
-            job.endpoints.setdefault(endpoint, {})[element] = count
+            return
+        job.endpoints.setdefault(endpoint, {})[element] = count
+        if element == CommonAttribute.TypeId:
+            job.pending.extend((endpoint, number) for number in _declarations(count))
 
     def _expand(self, job: Job) -> None:
         """Functional endpoints are numbered from 4 **with no gaps**
@@ -241,6 +256,16 @@ class Enumerator:
                 features=reads.get(CommonAttribute.Features, 0),
                 channel=reads.get(CommonAttribute.Channel, 0),
             )
+            model = node.endpoints[number]
+            for element in _declarations(reads.get(CommonAttribute.TypeId)):
+                if element in reads:
+                    meta = model.definition.attributes[element] if model.definition else None
+                    type_name = meta.type if meta is not None else "u8"
+                    model.attributes[element] = AttributeState(
+                        raw=encode(type_name, reads[element]),
+                        value=reads[element],
+                        at=node.last_heard,
+                    )
         self._system(node, job)
         self.installation.add(node)
 
@@ -311,6 +336,15 @@ class Enumerator:
 def _tell(job: Job, ready: bool) -> None:
     for then in job.then:
         then(ready)
+
+
+def _declarations(type_id: int | None) -> tuple[int, ...]:
+    """The `DECLARATIONS` this endpoint type has, by number."""
+    endpoint_type = _endpoint_type(type_id)
+    definition = CATALOG.get(endpoint_type) if endpoint_type is not None else None
+    if definition is None:
+        return ()
+    return tuple(meta.id for meta in definition.attributes.values() if meta.name in DECLARATIONS)
 
 
 def _width(length: int) -> str:

@@ -207,3 +207,57 @@ class TestWatchingSomebodyElsesRequest:
         schedule.fire_due(clock.now)
         assert len(bus.sent) == 1, "only the retry goes out from CORE"
         assert bus.tids[0] == 5, "and with the same Tid"
+
+
+class TestLongWrite:
+    """`LONG_WRITE` — a text for a display field (05-mapowanie-can.md §6; FEAT-12)."""
+
+    TEXT = 0x04
+    VALUE = bytes([13]) + b"Pranie gotowe"
+
+    def long_write(self) -> int:
+        return encode_id(MessageKind.LONG_WRITE, RELAY, 5, self.TEXT)
+
+    def test_every_segment_goes_out_at_once_with_one_tid(self, clock: Clock) -> None:
+        tx, bus, _ = manager(clock)
+        tx.request_long(0, self.long_write(), self.VALUE)
+        frames = [f for _, f in bus.sent]
+        assert [f.can_id for f in frames] == [self.long_write()] * 3
+        assert [f.data.hex(" ") for f in frames] == [
+            "00 00 0d 50 72 61 6e 69",
+            "00 01 65 20 67 6f 74 6f",
+            "80 02 77 65",
+        ], "PRZYKLADY 10, with the first Tid"
+
+    def test_the_one_reply_closes_it(self, clock: Clock) -> None:
+        tx, _, _ = manager(clock)
+        results: list[Outcome] = []
+        tx.request_long(0, self.long_write(), self.VALUE, on_done=results.append)
+        assert tx.on_response(response(5, self.TEXT, 0))
+        assert [r.result for r in results] == [ResultCode.OK]
+        assert len(tx) == 0
+
+    def test_silence_repeats_the_whole_value(self, clock: Clock) -> None:
+        """A node that lost a segment drops the value and says nothing; the hub sends
+        all of it again, never the missing piece (§6.6)."""
+        tx, bus, schedule = manager(clock)
+        tx.request_long(0, self.long_write(), self.VALUE)
+        clock.now += TIMEOUT
+        schedule.fire_due(clock.now)
+        assert len(bus.sent) == 6
+        assert [f.data for _, f in bus.sent[3:]] == [f.data for _, f in bus.sent[:3]]
+
+    def test_busy_repeats_the_whole_value(self, clock: Clock) -> None:
+        """BUSY: the node is assembling another value (§6.7)."""
+        tx, bus, _ = manager(clock)
+        results: list[Outcome] = []
+        tx.request_long(0, self.long_write(), self.VALUE, on_done=results.append)
+        tx.on_response(response(5, self.TEXT, 0, ResultCode.BUSY))
+        assert len(bus.sent) == 6 and not results
+        tx.on_response(response(5, self.TEXT, 0))
+        assert [(r.result, r.attempts) for r in results] == [(ResultCode.OK, 2)]
+
+    def test_an_empty_text_is_one_segment(self, clock: Clock) -> None:
+        tx, bus, _ = manager(clock)
+        tx.request_long(0, self.long_write(), b"\x00")
+        assert [f.data.hex(" ") for _, f in bus.sent] == ["80 00 00"]

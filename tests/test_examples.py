@@ -10,18 +10,20 @@ error is there. But as long as it agrees, it is the best test set we have.
 
 from __future__ import annotations
 
-from lagunhub.protocol.endpoints import GROUPS, KEY_INPUT, OUTPUT, SCENES, SENSE
+from lagunhub.core.segments import split
+from lagunhub.protocol.endpoints import DISPLAY, GROUPS, KEY_INPUT, OUTPUT, SCENES, SENSE
 from lagunhub.protocol.endpoints import output as out
 from lagunhub.protocol.endpoints.definition import decode_fields, encode_fields
 from lagunhub.protocol.frame import Frame, decode_header, encode_header, encode_id
-from lagunhub.protocol.quantities import Quantity, to_physical
+from lagunhub.protocol.quantities import Quantity, raw_type, to_physical
 from lagunhub.protocol.registry import MessageKind, ResultCode
-from lagunhub.protocol.values import decode, encode, encode_blob
+from lagunhub.protocol.values import decode, encode, encode_blob, encode_string
 
 # The installation from PRZYKLADY.md
 PANEL = 0x012
 RELAY_ADDR = 0x020
 DIMMER = 0x021
+KITCHEN_DISPLAY = 0x013
 
 
 def frame(can_id: int, payload: bytes) -> Frame:
@@ -213,6 +215,39 @@ class Test9Arbitration:
         assert Frame(0x10080800).fields.address == 0x020
         assert Frame(0x10540400).fields.address == 0x150
         assert 0x10080800 < 0x10540400
+
+
+class Test10Display:
+    """A number by an ordinary write, a text by a long one (types/0x0022-display.md)."""
+
+    def test_the_value_write(self) -> None:
+        value = DISPLAY.attribute("Value")
+        can_id = encode_id(MessageKind.WRITE, KITCHEN_DISPLAY, 4, value.id)
+        assert can_id == 0x0A04C402
+        payload = bytes([encode_header(tid=2)]) + encode(raw_type(Quantity.TEMPERATURE), 2137)
+        assert payload == bytes.fromhex("025908"), "21.37 °C, five of eight at the widest"
+        assert encode_id(MessageKind.RESPONSE, KITCHEN_DISPLAY, 4, value.id) == 0x0E04C402
+
+    def test_content_is_reported(self) -> None:
+        content = DISPLAY.attribute("Content")
+        assert encode_id(MessageKind.REPORT, KITCHEN_DISPLAY, 4, content.id) == 0x1004C400
+        assert encode("enum8", 1) == b"\x01"
+
+    def test_the_text_in_three_segments(self) -> None:
+        text = DISPLAY.attribute("Text")
+        assert encode_id(MessageKind.LONG_WRITE, KITCHEN_DISPLAY, 5, text.id) == 0x1404C504
+        value = encode_string("Pranie gotowe")
+        assert value.hex(" ") == "0d 50 72 61 6e 69 65 20 67 6f 74 6f 77 65"
+        assert [s.hex(" ") for s in split(value, tid=3)] == [
+            "03 00 0d 50 72 61 6e 69",
+            "03 01 65 20 67 6f 74 6f",
+            "83 02 77 65",
+        ]
+        assert encode_id(MessageKind.RESPONSE, KITCHEN_DISPLAY, 5, text.id) == 0x0E04C504
+
+    def test_text_length_counts_bytes(self) -> None:
+        assert len("Pranie skończone") == 16
+        assert len(encode_string("Pranie skończone")) - 1 == 17
 
 
 class TestTightestCase:

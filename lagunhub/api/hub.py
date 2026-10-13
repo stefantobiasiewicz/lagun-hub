@@ -99,7 +99,15 @@ from lagunhub.protocol.endpoints.definition import (
 from lagunhub.protocol.endpoints.enums import choices, coerce, render
 from lagunhub.protocol.quantities import Quantity
 from lagunhub.protocol.registry import MessageKind, ResultCode
-from lagunhub.protocol.values import ABSENT, SCALARS, Value, encode, in_range
+from lagunhub.protocol.values import (
+    ABSENT,
+    SCALARS,
+    STRING_PREFIX,
+    Value,
+    encode,
+    encode_string,
+    in_range,
+)
 
 DEFAULT_TIMEOUT = 2.0
 """A transaction gives up after three attempts, that is, after ~300 ms. Two seconds is
@@ -523,6 +531,11 @@ class HubApi:
             meta = self._named(definition.attribute, attribute, "attribute")
             if not meta.writable:
                 raise ApiError(Problem.INVALID, f"{meta.name} is read-only")
+            if meta.type == "string":
+                # A text: no coercion, no range — its limit is the field's, in bytes. The
+                # route onto the bus makes it a LONG_WRITE (core/hub.py).
+                self._exposed(model, meta, None, ref, endpoint)
+                return node, meta.id, self._encode_text(meta, value, model)
             encoded = self._encode(meta, value, model)
             self._exposed(model, meta, coerce(meta, value), ref, endpoint)
             return node, meta.id, encoded
@@ -871,6 +884,8 @@ class HubApi:
         missing: str | None = None,
     ) -> AttributeView:
         value = _plain(state.value) if state else None
+        if meta.type == "string" and state is not None:
+            value = _text(state.raw)
         return AttributeView(
             id=meta.id,
             name=meta.name,
@@ -1293,6 +1308,27 @@ class HubApi:
             raise ApiError(Problem.INVALID, f"{meta.name} = {coerced} is outside {type_name}")
         return encode(type_name, coerced)
 
+    @staticmethod
+    def _encode_text(meta: AttributeDef, value: Any, model: EndpointModel) -> bytes:
+        """UTF-8 with its prefix, refused here when it is longer than the field holds.
+
+        `TextLength` counts **bytes** (types/0x0022-display.md §5.3) — "Pranie skończone"
+        is sixteen letters and seventeen bytes. The hub has read it at enumeration, so it
+        refuses rather than letting the node do it; unknown, it sends and the node
+        decides."""
+        try:
+            encoded = encode_string(str(value))
+        except ValueError as exc:
+            raise ApiError(Problem.INVALID, f"{meta.name}: {exc}") from None
+        limit = _text_length(model)
+        if limit is not None and len(encoded) - STRING_PREFIX > limit:
+            raise ApiError(
+                Problem.INVALID,
+                f"{meta.name} is {len(encoded) - STRING_PREFIX} bytes; "
+                f"the field holds {limit} (TextLength)",
+            )
+        return encoded
+
     def _args(
         self, spec: tuple[Field, ...], args: Mapping[str, Any], model: EndpointModel
     ) -> bytes:
@@ -1533,9 +1569,39 @@ def _arg_type(field: Field, quantity: Quantity | None) -> str:
         return field.type
 
 
+def _text_length(model: EndpointModel) -> int | None:
+    """`TextLength` of a text field as the hub last saw it, or `None`."""
+    definition = model.definition
+    if definition is None:
+        return None
+    try:
+        number = definition.attribute("TextLength").id
+    except ValueError:
+        return None
+    state = model.attributes.get(number)
+    if state is None or not isinstance(state.value, int) or isinstance(state.value, bool):
+        return None
+    return state.value
+
+
+def _text(raw: bytes) -> str | None:
+    """A string attribute's bytes as text — a glyph that is not UTF-8 shown as the
+    replacement character, as a field would draw `?` (types/0x0022-display.md §5.3)."""
+    if not raw or len(raw) < STRING_PREFIX + raw[0]:
+        return None
+    return raw[STRING_PREFIX : STRING_PREFIX + raw[0]].decode("utf-8", errors="replace")
+
+
 def _quantity(model: EndpointModel) -> Quantity | None:
-    """The quantity `Sense` measures — without it `Value` cannot be decoded."""
-    state = model.attributes.get(sns.QUANTITY)
+    """The quantity of a `Sense` or a `Display` field — without it `Value` cannot be
+    decoded. Found by name: the two types happen to number it alike, and nothing says
+    the next one will."""
+    definition = model.definition
+    try:
+        number = definition.attribute("Quantity").id if definition is not None else sns.QUANTITY
+    except ValueError:
+        return None
+    state = model.attributes.get(number)
     if state is None or not isinstance(state.value, int) or isinstance(state.value, bool):
         return None
     try:

@@ -188,14 +188,15 @@ class TestSystemEndpoints:
         assert not scenes_present(key_sim), "a bare key has no output at all"
 
     def test_there_are_as_many_reads_as_the_spec_promises(self, clock: Clock) -> None:
-        """Four transactions per endpoint plus a few per node
-        (06-cykl-zycia-urzadzenia.md §3.1)."""
+        """Four transactions per endpoint plus a few per node, plus the type's
+        declarations — the panel's `Sense` adds its `Quantity`
+        (06-cykl-zycia-urzadzenia.md §3.1; zadania/zrobione/FEAT-12.md)."""
         inst = Rig(clock)
         joined(inst, panel3(uid=PANEL_UID, address=0, clock=clock))
 
         assert inst.core.enumeration.completed == 1
         assert inst.core.enumeration.failed == 0
-        assert inst.core.transactions.opened == 7 + 5 * 4
+        assert inst.core.transactions.opened == 7 + 5 * 4 + 1
         assert inst.core.transactions.retried == 0
 
 

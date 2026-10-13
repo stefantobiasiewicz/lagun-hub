@@ -50,6 +50,9 @@ EP_GROUPS: Final = 2
 EP_SCENES: Final = 3
 FIRST_FUNCTIONAL: Final = 4
 
+SEGMENT_TIMEOUT: Final = 0.100
+"""Silence after which a value under assembly is dropped (05-mapowanie-can.md §6.6)."""
+
 TX_CAPACITY: Final = 16
 """The controller's transmit queue. On overflow the oldest REPORT is lost, never an event
 or a reply (types/0x0002-diagnostics.md §5.3)."""
@@ -89,6 +92,8 @@ class NodeCore:
         self._factory_reset_pending = False
         self.faults = Faults()
         self._segments_pending = 0
+        self._long: _Assembly | None = None
+        """The one LONG_WRITE being assembled (05-mapowanie-can.md §6.7)."""
         self.joining: Joining | None = None
         """Not empty means the state WITHOUT AN ADDRESS (06-cykl-zycia-urzadzenia.md §1.1)."""
         self._tx: list[tuple[int, int, Frame]] = []
@@ -284,11 +289,19 @@ class NodeCore:
             return
         fields = frame.fields
         kind = fields.kind
-        if kind not in (MessageKind.READ, MessageKind.WRITE, MessageKind.COMMAND):
+        if kind not in (
+            MessageKind.READ,
+            MessageKind.WRITE,
+            MessageKind.COMMAND,
+            MessageKind.LONG_WRITE,
+        ):
             return  # other nodes' reports and events are for the hub alone
         if fields.address != self.address:
             return
         if not frame.data:
+            return
+        if kind == MessageKind.LONG_WRITE:
+            self._take_segment(fields.endpoint, fields.element, frame.data)
             return
 
         result_code, tid = decode_header(frame.data[0])
@@ -332,6 +345,43 @@ class NodeCore:
                 continue
             self._send(Frame(can_id, payload))
             self._segments_pending += 1
+
+    def _take_segment(self, number: int, element: int, data: bytes) -> None:
+        """One segment of a LONG_WRITE — the same rules as the C node
+        (lagunbus-node `node.c`, `take_segment`): segment 0 opens or restarts, segment 0
+        of another value while one is open gets BUSY, a gap or 100 ms of silence drops
+        the value without a word, the LAST is answered once with the Tid of segment 0."""
+        if len(data) < 2:
+            return
+        now = self.clock()
+        if self._long is not None and now - self._long.last >= SEGMENT_TIMEOUT:
+            self._long = None
+        tid, index, last = data[0] & 0x07, data[1], bool(data[0] & 0x80)
+        open_ = self._long
+        same = open_ is not None and (open_.endpoint, open_.element) == (number, element)
+        if index == 0:
+            if open_ is not None and not same:
+                self._respond(number, element, tid, ResultCode.BUSY)
+                return
+            open_ = self._long = _Assembly(number, element, tid)
+        elif open_ is None or not same:
+            return
+        elif index != open_.next:
+            self._long = None
+            return
+        open_.data += data[2:]
+        open_.next += 1
+        open_.last = now
+        if not last:
+            return
+        self._long = None
+        endpoint = self.endpoints.get(number)
+        result = (
+            ResultCode.UNSUPPORTED_ENDPOINT
+            if endpoint is None
+            else endpoint.write_long(element, bytes(open_.data))
+        )
+        self._respond(number, element, open_.tid, result)
 
     def _command(
         self, endpoint: Endpoint, number: int, command: int, tid: int, args: bytes
@@ -474,3 +524,18 @@ class NodeCore:
                 if meta.persist and meta.writable:
                     endpoint.values[attribute] = meta.default
         self.device.values[dev.ADDRESS] = ADDRESS_UNASSIGNED
+
+
+class _Assembly:
+    """A LONG_WRITE under assembly — keyed by endpoint and element, bound to the Tid of
+    its segment 0."""
+
+    __slots__ = ("data", "element", "endpoint", "last", "next", "tid")
+
+    def __init__(self, endpoint: int, element: int, tid: int) -> None:
+        self.endpoint = endpoint
+        self.element = element
+        self.tid = tid
+        self.next = 0
+        self.last = 0.0
+        self.data = bytearray()

@@ -527,6 +527,25 @@ class TestAskingForAValue:
         window.key(10)
         assert saved == [True]
 
+    def test_a_text_comes_back_as_typed(self) -> None:
+        """A display line: `yes` is a word and `30` two characters, not a boolean and a
+        number (FEAT-12)."""
+        saved: list[Any] = []
+        window = app._question(
+            title="t",
+            subject="p",
+            type_name="string",
+            choices=(),
+            now="",
+            on_accept=saved.append,
+            note="",
+        )
+        assert isinstance(window, overlay.Edit)
+        assert "bytes" in window.hint
+        window.on_accept("yes")
+        window.on_accept("30")
+        assert saved == ["yes", "30"]
+
 
 class TestCommandPicker:
     def test_the_command_picker_skips_those_without_a_feature(self, expanded: State) -> None:
@@ -1044,3 +1063,39 @@ class TestBuses:
     def test_the_key_is_listed_when_there_is_something_to_do(self, state: State) -> None:
         self.buses(state)
         assert ("u", "reconcile — the bus goes down for a moment") in panes.context_keys(state)
+
+
+class TestWhichAttributesAreShown:
+    """Every attribute the endpoint can have, known or not (FEAT-12): a display field's
+    `Content` before any read, and `Value`/`Text`, which start empty and are written
+    only with `w` — without a row there was nothing to stand on."""
+
+    @staticmethod
+    def field(**overrides: Any) -> Any:
+        from lagunhub.api import AttributeView
+
+        base = {"id": 0, "name": "x", "type": "u8", "access": "RO"}
+        return AttributeView(**{**base, **overrides})
+
+    def test_unknown_and_writable_rows_are_there(self) -> None:
+        from lagunhub.api import EndpointView
+
+        endpoint = EndpointView(
+            number=4,
+            attributes=(
+                self.field(id=0, name="Content", type="enum8"),
+                self.field(id=2, name="Value", type="<Q>", access="RW"),
+                self.field(id=4, name="Text", type="string", access="RW", available=False),
+            ),
+        )
+        assert [a.name for a in panes.worth_showing(endpoint)] == ["Content", "Value"], (
+            "Text belongs to a feature this field lacks — `w` would only be refused"
+        )
+
+    def test_a_value_the_endpoint_should_not_have_is_still_shown(self) -> None:
+        from lagunhub.api import EndpointView
+
+        endpoint = EndpointView(
+            number=4, attributes=(self.field(name="Text", available=False, wanted="hi"),)
+        )
+        assert [a.name for a in panes.worth_showing(endpoint)] == ["Text"]

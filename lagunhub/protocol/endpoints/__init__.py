@@ -14,6 +14,7 @@ from lagunhub.protocol.endpoints.common import COMMON
 from lagunhub.protocol.endpoints.definition import TypeDef
 from lagunhub.protocol.endpoints.device import DEVICE
 from lagunhub.protocol.endpoints.diagnostics import DIAGNOSTICS
+from lagunhub.protocol.endpoints.display import DISPLAY
 from lagunhub.protocol.endpoints.groups import GROUPS
 from lagunhub.protocol.endpoints.key_input import KEY_INPUT
 from lagunhub.protocol.endpoints.output import OUTPUT
@@ -23,7 +24,7 @@ from lagunhub.protocol.registry import EndpointType
 
 CATALOG: Final[dict[EndpointType, TypeDef]] = {
     definition.type_id: definition
-    for definition in (DEVICE, DIAGNOSTICS, SCENES, GROUPS, KEY_INPUT, OUTPUT, SENSE)
+    for definition in (DEVICE, DIAGNOSTICS, SCENES, GROUPS, KEY_INPUT, OUTPUT, DISPLAY, SENSE)
 }
 
 
@@ -44,6 +45,7 @@ __all__ = [
     "COMMON",
     "DEVICE",
     "DIAGNOSTICS",
+    "DISPLAY",
     "GROUPS",
     "KEY_INPUT",
     "OUTPUT",

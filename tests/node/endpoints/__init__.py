@@ -8,6 +8,7 @@ something arrives.
 from tests.node.endpoints.base import Endpoint, FunctionalEndpoint, SystemEndpoint
 from tests.node.endpoints.device import Device
 from tests.node.endpoints.diagnostics import Diagnostics
+from tests.node.endpoints.display import Display
 from tests.node.endpoints.groups import Groups
 from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
@@ -17,6 +18,7 @@ from tests.node.endpoints.sense import Sense
 __all__ = [
     "Device",
     "Diagnostics",
+    "Display",
     "Endpoint",
     "FunctionalEndpoint",
     "Groups",

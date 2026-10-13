@@ -518,16 +518,21 @@ _DETAILS: Final[dict[Section, Callable[[State], Pane]]] = {
 
 
 def worth_showing(endpoint: EndpointView) -> list[AttributeView]:
-    """Which attributes we show at all.
+    """Which attributes we show: **every one the endpoint can have**, known or not.
 
-    A known value, a value from the file, or something that **can be set**. The third is
-    here so that the pane says not only "what is" but also "what may be" — otherwise an
-    unset configuration attribute would be invisible until the first write.
+    Until FEAT-12 a row needed a known value, a value from the file, or to be
+    configuration. That hid exactly what a person came to look at or to set: `Content`
+    of a display field the hub had not read yet (it appeared only after `G`), and
+    `Display.Value`/`Text`, working settings that start empty and are written only with
+    `w` — no row, nothing to stand on. An unknown value is shown as unknown (`—`), which
+    is the honest answer (01-model-danych.md §6: the hub does not poll).
+
+    Hidden is only what the endpoint cannot have — its feature is not declared, or the
+    node said it does not expose it — unless the hub still holds a value or the file
+    asks for one: that disagreement is worth seeing.
     """
     return [
-        a
-        for a in endpoint.attributes
-        if a.value is not None or a.wanted is not None or a.configurable
+        a for a in endpoint.attributes if a.available or a.value is not None or a.wanted is not None
     ]
 
 
@@ -645,9 +650,11 @@ def traffic_row(item: TrafficView) -> tuple[str, int]:
 
 def _summary(e: EndpointView) -> str:
     """The endpoint’s most important value, in one piece."""
-    for name in ("OnOff", "Value", "Purpose", "EventMode"):
+    # A display field: its number, else its text, else `Content = NONE` — an empty text
+    # is nothing to show, not a value (types/0x0022-display.md §5.1).
+    for name in ("OnOff", "Value", "Text", "Purpose", "EventMode", "Content"):
         meta = next((a for a in e.attributes if a.name == name), None)
-        if meta is not None and meta.value is not None:
+        if meta is not None and meta.value not in (None, ""):
             return f"{name} = {_val(meta.value, meta.label)}"
     return MISSING
 

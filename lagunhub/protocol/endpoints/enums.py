@@ -21,7 +21,7 @@ ENUMS: Final[dict[str, tuple[type, ...]]] = {}
 
 
 def _build() -> None:
-    from lagunhub.protocol.endpoints import key_input, output
+    from lagunhub.protocol.endpoints import display, key_input, output
     from lagunhub.protocol.quantities import Quantity
 
     ENUMS.update(
@@ -30,6 +30,7 @@ def _build() -> None:
             "PowerOnBehaviour": (output.PowerOnBehaviour,),
             "EventMode": (key_input.EventMode,),
             "Quantity": (Quantity,),
+            "Content": (display.Content,),
         }
     )
 
