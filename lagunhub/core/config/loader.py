@@ -401,12 +401,39 @@ def _binding(
     raw: dict[str, Any], by_alias: dict[str, NodeConfig], groups: dict[int, GroupConfig]
 ) -> BindingConfig:
     source = _source(raw["from"], by_alias)
-    raw_bytes = raw["to"]
-    targets = tuple(
-        _target(item, by_alias, groups)
-        for item in (raw_bytes if isinstance(raw_bytes, list) else [raw_bytes])
-    )
+    raw_targets = raw["to"]
+    items = raw_targets if isinstance(raw_targets, list) else [raw_targets]
+    targets = tuple(_target(item, by_alias, groups) for item in items)
+    for item, target in zip(items, targets, strict=True):
+        if target.kind == MessageKind.WRITE:
+            _carries_value(raw["from"], item, source)
     return BindingConfig(source=source, targets=targets)
+
+
+def _carries_value(
+    raw_source: dict[str, Any], raw_target: dict[str, Any], source: SourceRef
+) -> None:
+    """A write carries the source's value, copied byte for byte (07-hub.md §3.2).
+
+    So the source has to be an attribute — an event carries no attribute value, and
+    before this check such a binding sent an empty write the node refused — and of the
+    same type, because the hub converts nothing (zadania/FEAT-13.md N2, N9). `<Q>`
+    against `<Q>` passes: whether the two quantities agree is known only from the nodes,
+    and the hub does not check it yet (N4). A string never gets here — no reported
+    attribute is one, and a binding write goes as a plain WRITE.
+    """
+    if not source.on_report:
+        raise ConfigError(
+            f"{source.label}: a write needs an attribute as its source, not an event — "
+            "an event carries no value to write"
+        )
+    given = by_name(str(raw_source["type"])).attribute(str(raw_source["attribute"])).type
+    wanted = by_name(str(raw_target["type"])).attribute(str(raw_target["attribute"])).type
+    if given != wanted:
+        raise ConfigError(
+            f"{source.label}: a {given} cannot be written into a {wanted} — the hub copies "
+            "the value and converts nothing"
+        )
 
 
 def _alias(raw: dict[str, Any], by_alias: dict[str, NodeConfig]) -> NodeConfig:

@@ -3,6 +3,12 @@
 # Both sides are keyed by Uid — through an alias the hub translates on load. The `type`
 # field is mandatory and does what `expect` in KONFIGURACJA.md §10 promises: it lets a
 # typo in `Toogle` be caught without access to the hardware.
+#
+# A write as the target carries the source's value, copied as it is, on every report
+# (KONFIGURACJA.md §5, zadania/FEAT-13.md) — e.g. a sensor's temperature on a display:
+#
+# - from: { node: kitchen-env, endpoint: 4, type: Sense,   attribute: Value }
+#   to:   { node: hall-epd,    endpoint: 4, type: Display, attribute: Value }
 
 bindings:
 - from:

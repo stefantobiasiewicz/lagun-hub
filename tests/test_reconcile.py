@@ -200,7 +200,8 @@ class TestOnlyWhatTheEndpointDeclares:
 
 
 class TestBindingOnAttributeChange:
-    """07-hub.md §3.1 — it fires on a **change of value**, not on every report."""
+    """07-hub.md §3.1 — a command fires on a **change of value**, not on every report; a
+    write fires on every report (zadania/FEAT-13.md N8)."""
 
     TRESC = CONFIG.replace(
         "from: { node: kitchen-switch, endpoint: 4, type: KeyInput, event: Click }",
@@ -221,9 +222,16 @@ class TestBindingOnAttributeChange:
 
         assert inst.core.transactions.opened > before, "the change of state pulled a write along"
 
-    def test_the_same_report_twice_does_not_fire(self, clock: Clock, tmp_path: Path) -> None:
+    COMMAND = TRESC.replace(
+        "to:   { node: kitchen-switch, endpoint: 4, type: KeyInput, attribute: HoldEnabled }",
+        "to:   { node: kitchen-relay,  endpoint: 4, type: Output,   command: On }",
+    )
+
+    def test_the_same_report_twice_does_not_fire_a_command(
+        self, clock: Clock, tmp_path: Path
+    ) -> None:
         """Otherwise the periodic refresh would generate commands in circles."""
-        inst = build(clock, tmp_path, self.TRESC)
+        inst = build(clock, tmp_path, self.COMMAND)
         relay = joined(inst, relay1(uid=bytes(range(8, 16)), address=0, clock=clock, name="r"))
         joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
 
@@ -237,6 +245,24 @@ class TestBindingOnAttributeChange:
         inst.run(0.3, step=0.02)
 
         assert inst.core.transactions.opened == after_first
+
+    def test_the_same_report_twice_writes_twice(self, clock: Clock, tmp_path: Path) -> None:
+        """A write target may expire on its node (`Display.ContentTimeout`); the periodic
+        report is what refreshes it."""
+        inst = build(clock, tmp_path, self.TRESC)
+        relay = joined(inst, relay1(uid=bytes(range(8, 16)), address=0, clock=clock, name="r"))
+        joined(inst, key1(uid=bytes(range(8)), address=0, clock=clock, name="sw"))
+
+        output = relay.endpoint(4, Output)
+        output.set(out.ON_OFF, True)
+        inst.run(0.3, step=0.02)
+        after_first = inst.core.transactions.opened
+
+        output.report(out.ON_OFF)
+        relay.flush()
+        inst.run(0.3, step=0.02)
+
+        assert inst.core.transactions.opened == after_first + 1
 
     def test_a_report_does_not_enter_the_fast_path(self, clock: Clock, tmp_path: Path) -> None:
         inst = build(clock, tmp_path, self.TRESC)

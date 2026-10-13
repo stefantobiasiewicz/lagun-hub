@@ -214,6 +214,25 @@ class TestStaticValidation:
         with pytest.raises(ConfigError, match="RO"):
             load(save(tmp_path, content))
 
+    def test_an_event_cannot_feed_a_write(self, tmp_path: Path) -> None:
+        """An event carries no attribute value, so a write would have nothing to write
+        (07-hub.md §3.2; zadania/FEAT-13.md N9)."""
+        content = BASE.replace(
+            "type: Output,   command: Toggle", "type: Output,   attribute: AutoOffTime"
+        )
+        with pytest.raises(ConfigError, match="needs an attribute as its source"):
+            load(save(tmp_path, content))
+
+    def test_a_write_takes_a_value_of_the_same_type(self, tmp_path: Path) -> None:
+        """The hub copies bytes and converts nothing — `bool` into `u16` is a mistake in
+        the file, not a conversion (zadania/FEAT-13.md N2, N4)."""
+        content = BASE.replace(
+            "from: { node: kitchen-switch, endpoint: 4, type: KeyInput, event: Click }",
+            "from: { node: kitchen-relay, endpoint: 4, type: Output, attribute: OnOff }",
+        ).replace("type: Output,   command: Toggle", "type: Output,   attribute: AutoOffTime")
+        with pytest.raises(ConfigError, match=r"bool.*u16"):
+            load(save(tmp_path, content))
+
     def test_an_attribute_without_an_endpoint_type(self, tmp_path: Path) -> None:
         content = BASE.replace("4: { type: KeyInput, HoldTickInterval", "4: { HoldTickInterval")
         with pytest.raises(ConfigError, match="`type`"):
@@ -308,17 +327,21 @@ class TestThreeShapesOfTarget:
         assert targets[0].payload == b"", "Off has no arguments"
 
     def test_an_attribute_write(self, tmp_path: Path) -> None:
-        """When the target is a value, not an action — that serves queries
-        (07-hub.md §3.2)."""
+        """When the target is a value, not an action: it carries the source's value
+        (07-hub.md §3.2), so it hangs on a report and is marked to copy it."""
         content = BASE.replace(
+            "from: { node: kitchen-switch, endpoint: 4, type: KeyInput, event: Click }",
+            "from: { node: kitchen-relay, endpoint: 4, type: Output, attribute: OnOff }",
+        ).replace(
             "to:   { node: kitchen-relay,  endpoint: 4, type: Output,   command: Toggle }",
-            "to:   { node: kitchen-relay,  endpoint: 4, type: Output,   attribute: AutoOffTime }",
+            "to:   { node: kitchen-switch, endpoint: 4, type: KeyInput, attribute: HoldEnabled }",
         )
         inst = self.setup(tmp_path, content)
-        (target,) = inst.snapshot().bind[(SWITCH, 4, ki.CLICK)]
+        (target,) = inst.snapshot().on_report[(RELAY, 4, out.ON_OFF)]
 
         assert Frame(target.can_id).fields.kind == MessageKind.WRITE
         assert target.transactional
+        assert target.copies_value
 
     def test_a_group_without_members_yields_zero_frames(self, tmp_path: Path) -> None:
         content = BASE.replace("groups: [all-lights]", "groups: []").replace(

@@ -133,6 +133,28 @@ który przyjdzie po komendzie, jest ścieżką wolną i też nie jest źródłem
 
 Pętla jest więc niemożliwa do zbudowania, a nie tylko zabroniona.
 
+### 3.3 A binding on a report
+
+A reported attribute as the source never reaches the fast path: `Snapshot.on_report` is
+read by CORE in `_fire_report`. Its target is one of two kinds, and they fire differently
+(`07-hub.md` §3.1, §3.2; `zadania/FEAT-13.md`):
+
+- **a command** fires on a change of value only — a periodic report repeating the same
+  value would otherwise toggle a relay every minute;
+- **a write** (`Target.copies_value`) fires on **every** report, periodic too, and its
+  value is the report's bytes, copied as they are — "absent" included. A display field
+  blanks after `ContentTimeout` while the temperature stands still; the periodic report
+  is what keeps it lit. Writing the same value again is harmless, and the loop of §3.2
+  cannot form.
+
+The loader keeps such a write honest: its source must be an attribute (an event carries
+no value — before FEAT-13 such a binding sent an empty write the node refused) of the
+same wire type. `<Q>` against `<Q>` passes; whether the two `Quantity` agree is known
+only from the nodes and is **not checked yet** — left, with value-carrying commands
+(`level: $value` from a dial), group targets and queries, to the bindings epic. The
+binding write goes through `TransactionManager.request` directly, not `_transact`: no
+reported attribute is a string, so a `LONG_WRITE` cannot be needed.
+
 ---
 
 ## 4. Ścieżka szybka w szczegółach

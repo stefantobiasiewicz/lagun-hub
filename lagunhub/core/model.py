@@ -533,6 +533,7 @@ class Installation:
                 payload=bytes([encode_header(0)]) + spec.args,
                 transactional=True,
                 label=spec.label,
+                copies_value=spec.kind == MessageKind.WRITE,
             ),
         )
 
@@ -589,6 +590,9 @@ class Target:
     payload: bytes
     transactional: bool
     label: str = ""
+    copies_value: bool = False
+    """A write: its value is the report that fired it, not ``payload[1:]``
+    (07-hub.md §3.2). Fires on every report, not only on a change (§3.1)."""
 
 
 @dataclass(frozen=True, slots=True)

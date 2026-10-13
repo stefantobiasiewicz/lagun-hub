@@ -256,6 +256,23 @@ Trzy rzeczy, które plik musi umieć wyrazić, bo wynikają ze specyfikacji:
 | komenda grupowa | gdy cele mają ruszyć jednocześnie | §3.2, §6 |
 | **zapis atrybutu** | gdy celem jest wartość, nie akcja | §3.2 — patrz §6 poniżej |
 
+**What the hub does today with a write target** (`zadania/FEAT-13.md`) — in the syntax
+the loader actually reads:
+
+```yaml
+# a sensor's temperature on a display field
+- from: { node: kitchen-env, endpoint: 4, type: Sense,   attribute: Value }
+  to:   { node: hall-epd,    endpoint: 4, type: Display, attribute: Value }
+```
+
+The write carries **the source's value, copied byte for byte** — no scale, no offset,
+"absent" passes as "absent". It fires on every report of the source, periodic ones
+included, so a field with `ContentTimeout` stays lit; a command target still fires only
+on a change. The loader refuses an event as the source of a write (an event has no
+value to write) and two attributes of different types (`bool` into `u16`). It does
+**not** check that the two `Quantity` agree: a humidity sensor bound to a °C field shows
+a wrong number, or the field refuses the write. That check comes with the bindings epic.
+
 I jedna, której **nie wolno** wyrazić: łańcucha. Powiązanie, którego źródłem jest skutek
 innego powiązania, jest zabronione ([`07-hub.md`](../lagunbus-spec/07-hub.md) §4.1) — a w tej
 architekturze jest wręcz niemożliwe do zbudowania
