@@ -47,7 +47,7 @@ EP4 = EndpointView(
     channel=1,
     name="The lamp over the table",
     attributes=(
-        AttributeView(id=0x00, name="OnOff", type="bool", access="RO", value=False),
+        AttributeView(id=0x00, name="OnOff", type="bool", access="RO", value=False, reported=True),
         AttributeView(
             id=0x17,
             name="Purpose",
@@ -143,6 +143,7 @@ EP4_KEY = EndpointView(
     name="Left key",
     attributes=(
         AttributeView(id=0x15, name="HoldThreshold", type="u16", access="RW", configurable=True),
+        AttributeView(id=0x14, name="HoldEnabled", type="bool", access="RW", configurable=True),
     ),
     events=("Down", "Up", "Click", "HoldStart"),
 )

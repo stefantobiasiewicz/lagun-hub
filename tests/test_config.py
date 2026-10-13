@@ -216,7 +216,7 @@ class TestStaticValidation:
 
     def test_an_event_cannot_feed_a_write(self, tmp_path: Path) -> None:
         """An event carries no attribute value, so a write would have nothing to write
-        (07-hub.md §3.2; zadania/FEAT-13.md N9)."""
+        (07-hub.md §3.2; zadania/zrobione/FEAT-13.md N9)."""
         content = BASE.replace(
             "type: Output,   command: Toggle", "type: Output,   attribute: AutoOffTime"
         )
@@ -225,7 +225,7 @@ class TestStaticValidation:
 
     def test_a_write_takes_a_value_of_the_same_type(self, tmp_path: Path) -> None:
         """The hub copies bytes and converts nothing — `bool` into `u16` is a mistake in
-        the file, not a conversion (zadania/FEAT-13.md N2, N4)."""
+        the file, not a conversion (zadania/zrobione/FEAT-13.md N2, N4)."""
         content = BASE.replace(
             "from: { node: kitchen-switch, endpoint: 4, type: KeyInput, event: Click }",
             "from: { node: kitchen-relay, endpoint: 4, type: Output, attribute: OnOff }",

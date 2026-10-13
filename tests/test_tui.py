@@ -668,6 +668,60 @@ class TestQuestionChain:
             },
         }
 
+    def test_the_wizard_binds_a_report_to_a_write(self, state: State) -> None:
+        """A reported attribute as the source, a writable one of the same type as the
+        target — the binding that carries a sensor's value to a display field
+        (zadania/zrobione/FEAT-13.md). Only same-type attributes are offered: the loader would
+        refuse the rest."""
+        state.section = Section.BINDINGS
+        app.key(state, ord("+"))
+        assert isinstance(state.overlay, overlay.Choose)
+        state.overlay.cursor = list(state.overlay.options).index("kitchen-relay")
+        app.key(state, 10)
+        _run(state)
+
+        assert isinstance(state.overlay, overlay.Choose)
+        state.overlay.cursor = next(
+            i for i, o in enumerate(state.overlay.options) if o.startswith("ep4")
+        )
+        app.key(state, 10)  # ep4 Output — no events, one reported attribute
+
+        assert isinstance(state.overlay, overlay.Choose)
+        assert state.overlay.options == ("report: OnOff",)
+        app.key(state, 10)
+
+        assert isinstance(state.overlay, overlay.Choose)
+        state.overlay.cursor = list(state.overlay.options).index("hall-switch")
+        app.key(state, 10)
+        _run(state)
+
+        assert isinstance(state.overlay, overlay.Choose)
+        assert all(o.startswith("ep4") for o in state.overlay.options), "only a bool to write"
+        app.key(state, 10)  # ep4 KeyInput
+
+        assert isinstance(state.overlay, overlay.Choose)
+        assert state.overlay.options == ("HoldEnabled",), "HoldThreshold is a u16"
+        app.key(state, 10)
+        _run(state)
+
+        write = next(c for c in _fake(state).calls if c[0] == "config_set")
+        path, value, _ = write[1]
+        assert path == "bindings"
+        assert value[-1] == {
+            "from": {
+                "node": "kitchen-relay",
+                "endpoint": 4,
+                "type": "Output",
+                "attribute": "OnOff",
+            },
+            "to": {
+                "node": "hall-switch",
+                "endpoint": 4,
+                "type": "KeyInput",
+                "attribute": "HoldEnabled",
+            },
+        }
+
 
 class TestNaming:
     def test_an_alias_is_stored_under_the_uid(self, expanded: State) -> None:

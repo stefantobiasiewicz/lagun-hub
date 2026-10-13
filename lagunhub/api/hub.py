@@ -901,6 +901,7 @@ class HubApi:
             choices=choices(meta),
             configurable=meta.writable and meta.persist and missing is None,
             available=missing is None,
+            reported=meta.reported,
         )
 
     def _age(self, state: AttributeState | None) -> float | None:

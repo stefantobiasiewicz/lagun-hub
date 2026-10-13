@@ -45,6 +45,9 @@ class AttributeView:
     """`False` when this endpoint cannot have the attribute — its feature is not
     declared, or the node said it does not expose it and sets the value itself. Shown
     anyway, for the same reason as `CommandView.available`."""
+    reported: bool = False
+    """The node reports it by itself — so it can be a binding's source
+    (07-hub.md §3.1). The view's binding wizard offers only these."""
 
 
 @dataclass(frozen=True, slots=True)

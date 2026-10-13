@@ -535,14 +535,19 @@ class CoreThread(threading.Thread):
         A command fires on a change only, or a periodic report would toggle a relay
         every minute. A write fires on every report and carries its value: a display
         field blanks after `ContentTimeout` while the temperature stands still, and the
-        periodic report is what keeps it lit (07-hub.md §3.1; zadania/FEAT-13.md N8).
+        periodic report is what keeps it lit (07-hub.md §3.1; zadania/zrobione/FEAT-13.md N8).
         """
         uid = self.installation.by_address.get(address)
         if uid is None:
             return
         for target in self.snapshot_targets(uid, endpoint, element):
             if target.copies_value:
-                self.transactions.request(target.bus, target.can_id, value)
+                # Through `_transact`, as an API write: a successful reply lands in the
+                # model, so the view shows what the field shows.
+                to = Frame(target.can_id).fields
+                self._transact(
+                    target.bus, to.address, to.endpoint, to.element, MessageKind.WRITE, value
+                )
             elif changed:
                 self.fire(target)
 

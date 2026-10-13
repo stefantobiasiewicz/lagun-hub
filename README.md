@@ -42,16 +42,20 @@ Potem w liście konfiguracji są gotowe pozycje:
 | | Co uruchamia |
 |---|---|
 | **0 · Stack: hub + simulators** | everything below at once: 1, 3a and 3b — the whole installation without hardware |
+| **0b · Stack: hub + display** | 1 and 3c — write to the fields from the view |
+| **0c · Stack: hub + env + display** | 1, 3c and 3d — the sensor's temperature and humidity reach the display through `config/bindings.yaml` (report → write, zadania/zrobione/FEAT-13.md); `+` `−` `x` in the sensor's window |
 | **1 · Hub (UDP, simulators)** | `lagun-hub run --udp --ephemeral --accept-new --config config` — on a temporary copy of `config/` |
 | **3a · Sim: kitchen-relay** | `lagun-sim output --channels 8` as `kitchen-relay` (`08090a0b0c0d0e0f`), fresh every run |
 | **3b · Sim: test key** | `lagun-sim key --channels 4` as `test` (`a201020304050607`), bound to the relay in `config/bindings.yaml` |
+| **3c · Sim: kitchen-display** | `lagun-sim display` as `kitchen-display` (`1011121314151617`), fresh every run |
+| **3d · Sim: kitchen-env** | `lagun-sim env` as `kitchen-env` (`2021222324252627`), fresh every run — a room sensor, temperature and humidity |
 | **2 · Full-screen view** | `lagun-hub tui` przeciwko chodzącemu hubowi |
 | **4 · Identifier registry** | tabela identyfikatorów, jaką hub widzi |
 | **5 · Tests** | `pytest` na całym katalogu |
 
 Widok **nie startuje huba — dołącza się do chodzącego**, więc hub musi już pracować
 (`lagun-hub run`). Ma włączone *Emulate terminal in output console*, bo czyta
-z klawiatury i rysuje w `curses`; bez tego PyCharm nie przepuści klawiszy. The simulators (3a, 3b) need it too — each is a terminal view — and
+z klawiatury i rysuje w `curses`; bez tego PyCharm nie przepuści klawiszy. The simulators (3a–3d) need it too — each is a terminal view — and
 their interpreter is `../lagun-sim/.venv`, installed as in
 [`../lagun-sim/README.md`](../lagun-sim/README.md).
 
@@ -313,7 +317,7 @@ i token bierze sam z `config/`, więc zwykle wystarcza `lagun-hub tui`; inaczej
 | `u` w `Buses` | uzgodnij magistralę z `hub.yaml` (`ip link`) — pyta o nazwę, bo magistrala na chwilę znika; sprzęt jest odpytywany tylko, gdy sekcja jest otwarta |
 | `R` | uzgodnij ten węzeł teraz |
 | `G` | read everything from the node in the background — inside an endpoint, only that endpoint; the pane title counts down what is left |
-| `+` `-` | dodaj / usuń powiązanie |
+| `+` `-` | dodaj / usuń powiązanie — zdarzenie → komenda bez argumentów albo raport → zapis atrybutu tego samego typu (FEAT-13) |
 | `/` `spacja` `r` `?` | filtr / pauza podglądu / odśwież / pomoc |
 | `q` | **jedyne** wyjście — klawisz nawigacji nigdy nie zamyka widoku |
 

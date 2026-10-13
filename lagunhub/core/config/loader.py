@@ -417,7 +417,7 @@ def _carries_value(
 
     So the source has to be an attribute — an event carries no attribute value, and
     before this check such a binding sent an empty write the node refused — and of the
-    same type, because the hub converts nothing (zadania/FEAT-13.md N2, N9). `<Q>`
+    same type, because the hub converts nothing (zadania/zrobione/FEAT-13.md N2, N9). `<Q>`
     against `<Q>` passes: whether the two quantities agree is known only from the nodes,
     and the hub does not check it yet (N4). A string never gets here — no reported
     attribute is one, and a binding write goes as a plain WRITE.

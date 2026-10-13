@@ -137,7 +137,7 @@ Pętla jest więc niemożliwa do zbudowania, a nie tylko zabroniona.
 
 A reported attribute as the source never reaches the fast path: `Snapshot.on_report` is
 read by CORE in `_fire_report`. Its target is one of two kinds, and they fire differently
-(`07-hub.md` §3.1, §3.2; `zadania/FEAT-13.md`):
+(`07-hub.md` §3.1, §3.2; `zadania/zrobione/FEAT-13.md`):
 
 - **a command** fires on a change of value only — a periodic report repeating the same
   value would otherwise toggle a relay every minute;
@@ -152,8 +152,15 @@ no value — before FEAT-13 such a binding sent an empty write the node refused)
 same wire type. `<Q>` against `<Q>` passes; whether the two `Quantity` agree is known
 only from the nodes and is **not checked yet** — left, with value-carrying commands
 (`level: $value` from a dial), group targets and queries, to the bindings epic. The
-binding write goes through `TransactionManager.request` directly, not `_transact`: no
-reported attribute is a string, so a `LONG_WRITE` cannot be needed.
+binding write goes through `_transact`, as an API write does, so the reply lands in the
+model and the view shows what the field shows (the first version went to
+`TransactionManager.request` directly and the view stayed empty — found on the
+simulators).
+
+The view's binding wizard (`+`) builds both shapes from lists: after a source endpoint
+it offers its events and its reported attributes (`AttributeView.reported`); a reported
+one leads to the writable attributes of the same type on the target, and nothing else —
+the same rule the loader enforces, so the wizard cannot write an entry the file refuses.
 
 ---
 

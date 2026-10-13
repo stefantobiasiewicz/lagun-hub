@@ -256,7 +256,7 @@ Trzy rzeczy, które plik musi umieć wyrazić, bo wynikają ze specyfikacji:
 | komenda grupowa | gdy cele mają ruszyć jednocześnie | §3.2, §6 |
 | **zapis atrybutu** | gdy celem jest wartość, nie akcja | §3.2 — patrz §6 poniżej |
 
-**What the hub does today with a write target** (`zadania/FEAT-13.md`) — in the syntax
+**What the hub does today with a write target** (`zadania/zrobione/FEAT-13.md`) — in the syntax
 the loader actually reads:
 
 ```yaml

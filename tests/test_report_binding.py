@@ -1,5 +1,5 @@
 """A sensor's value on a display field: a binding report → write that carries the value
-across (07-hub.md §3.1, §3.2; zadania/FEAT-13.md).
+across (07-hub.md §3.1, §3.2; zadania/zrobione/FEAT-13.md).
 
 The hub copies the report's bytes into the write — no conversion, "absent" included —
 and writes on **every** report, periodic too, because the field forgets its content
@@ -86,7 +86,7 @@ def test_a_periodic_report_writes_again(
     hub: Hub, screen: NodeCore, sensor: NodeCore, spy: VirtualBus
 ) -> None:
     """The same value twice is still a write: otherwise the field goes blank after
-    `ContentTimeout` though the sensor is alive (zadania/FEAT-13.md N8)."""
+    `ContentTimeout` though the sensor is alive (zadania/zrobione/FEAT-13.md N8)."""
     sense = sensor.endpoint(4, Sense)
     sense.values[CommonAttribute.ReportInterval] = 10
     sense.measure(2137)
@@ -101,7 +101,7 @@ def test_a_periodic_report_writes_again(
 
 def test_absent_is_carried_across(hub: Hub, screen: NodeCore, sensor: NodeCore) -> None:
     """A sensor that lost its reading says so; the field shows dashes instead of a
-    stale number (Sense §5.2; zadania/FEAT-13.md N5)."""
+    stale number (Sense §5.2; zadania/zrobione/FEAT-13.md N5)."""
     sense = sensor.endpoint(4, Sense)
     sense.measure(2137)
     hub.inst.run(0.2)
@@ -109,3 +109,19 @@ def test_absent_is_carried_across(hub: Hub, screen: NodeCore, sensor: NodeCore) 
     sense.set(VALUE_SENSE, ABSENT)  # `measure` takes a reading, not its absence
     hub.inst.run(0.2)
     assert screen.endpoint(4, Display).shows is Content.NONE
+
+
+def test_the_view_says_which_attribute_is_reported(hub: Hub, sensor: NodeCore) -> None:
+    """What the binding wizard in the view offers as a source (zadania/zrobione/FEAT-13.md)."""
+    ep4 = next(e for e in hub.api.node("kitchen-env").detail if e.number == 4)
+    reported = {a.name for a in ep4.attributes if a.reported}
+    assert reported == {"Value"}
+
+
+def test_the_hub_remembers_what_it_wrote(hub: Hub, screen: NodeCore, sensor: NodeCore) -> None:
+    """A binding's write lands in the model as an API write does — otherwise the view shows
+    the field empty while the screen shows the number."""
+    sensor.endpoint(4, Sense).measure(2137)
+    hub.inst.run(0.2)
+    ep4 = next(e for e in hub.api.node("hall-epd").detail if e.number == 4)
+    assert next(a for a in ep4.attributes if a.name == "Value").value == 2137

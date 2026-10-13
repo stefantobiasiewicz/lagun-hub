@@ -5,10 +5,8 @@
 # typo in `Toogle` be caught without access to the hardware.
 #
 # A write as the target carries the source's value, copied as it is, on every report
-# (KONFIGURACJA.md §5, zadania/FEAT-13.md) — e.g. a sensor's temperature on a display:
-#
-# - from: { node: kitchen-env, endpoint: 4, type: Sense,   attribute: Value }
-#   to:   { node: hall-epd,    endpoint: 4, type: Display, attribute: Value }
+# (KONFIGURACJA.md §5, zadania/zrobione/FEAT-13.md) — below, the sensor's temperature and
+# humidity on the display's fields 4 and 6.
 
 bindings:
 - from:
@@ -31,3 +29,23 @@ bindings:
     endpoint: 4
     type: Output
     command: Toggle
+- from:
+    node: kitchen-env
+    endpoint: 4
+    type: Sense
+    attribute: Value
+  to:
+    node: kitchen-display
+    endpoint: 4
+    type: Display
+    attribute: Value
+- from:
+    node: kitchen-env
+    endpoint: 5
+    type: Sense
+    attribute: Value
+  to:
+    node: kitchen-display
+    endpoint: 6
+    type: Display
+    attribute: Value

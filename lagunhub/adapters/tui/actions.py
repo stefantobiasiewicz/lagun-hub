@@ -15,11 +15,11 @@ the loader will not read.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Final
 
 from lagunhub.adapters.tui import overlay
 from lagunhub.adapters.tui.state import State
-from lagunhub.api import CommandView, EndpointView, NodeSummary, NodeView
+from lagunhub.api import AttributeView, CommandView, EndpointView, NodeSummary, NodeView
 
 Next = Callable[[Any], None]
 
@@ -138,9 +138,17 @@ def name_node(state: State, ref: str, uid: str, field: str) -> None:
 # --- the binding wizard -----------------------------------------------------------
 
 
+REPORT: Final = "report: "
+"""How a reported attribute is told apart from an event in one list of sources."""
+
+
 def add_binding(state: State) -> None:
     """Six questions: from where, what, and to where. Each from a list — there is nothing
-    to type."""
+    to type.
+
+    Two shapes: an event fires a command without arguments, a reported attribute fills a
+    writable attribute of the same type with its value (07-hub.md §3.2;
+    zadania/zrobione/FEAT-13.md). The lists offer only what the loader will accept."""
     sources = _with_an_alias(state)
     if not sources:
         state.say("! no node has an alias — give one with [N] in the Nodes section")
@@ -150,7 +158,7 @@ def add_binding(state: State) -> None:
 
 def _source_endpoint(state: State, alias: str) -> None:
     def next_step(node: NodeView) -> None:
-        endpoints = tuple(e for e in node.detail if e.events)
+        endpoints = tuple(e for e in node.detail if e.events or _reported(e))
         if not endpoints:
             state.say(f"! {alias} has no endpoint that reports anything")
             return
@@ -164,14 +172,101 @@ def _source_endpoint(state: State, alias: str) -> None:
     _fetch(state, alias, next_step)
 
 
+def _reported(endpoint: EndpointView) -> tuple[AttributeView, ...]:
+    return tuple(a for a in endpoint.attributes if a.reported and a.available)
+
+
 def _source_event(state: State, alias: str, endpoint: EndpointView) -> None:
+    attributes = {f"{REPORT}{a.name}": a for a in _reported(endpoint)}
+
+    def chosen(selected: Any) -> None:
+        if str(selected) in attributes:
+            _write_node(state, alias, endpoint, attributes[str(selected)])
+        else:
+            _target_node(state, alias, endpoint, str(selected))
+
     state.overlay = overlay.Choose(
-        title="Binding · event",
+        title="Binding · source",
         subject=f"{alias} · ep{endpoint.number} {endpoint.type_name}",
-        options=endpoint.events,
-        on_accept=lambda ev: _target_node(state, alias, endpoint, str(ev)),
-        note="this event will fire the command chosen in the next steps",
+        options=(*endpoint.events, *attributes),
+        on_accept=chosen,
+        note="an event fires a command; a report writes its value into an attribute",
     )
+
+
+# --- report → write -----------------------------------------------------------------
+
+
+def _write_node(state: State, alias: str, source: EndpointView, attribute: AttributeView) -> None:
+    _choose_node(
+        state,
+        "Binding · target",
+        _with_an_alias(state),
+        lambda target_alias: _write_endpoint(state, alias, source, attribute, str(target_alias)),
+    )
+
+
+def _writable(endpoint: EndpointView, like: AttributeView) -> tuple[str, ...]:
+    """Same type only: the hub copies the value and converts nothing — `<Q>` against
+    `<Q>` included, whose quantities nobody checks yet (zadania/zrobione/FEAT-13.md N4)."""
+    return tuple(
+        a.name
+        for a in endpoint.attributes
+        if "W" in a.access and a.available and a.type == like.type and a.type != "string"
+    )
+
+
+def _write_endpoint(
+    state: State, alias: str, source: EndpointView, attribute: AttributeView, target_alias: str
+) -> None:
+    def next_step(node: NodeView) -> None:
+        endpoints = tuple(e for e in node.detail if _writable(e, attribute))
+        if not endpoints:
+            state.say(f"! {target_alias} has no writable {attribute.type} attribute")
+            return
+        _choose_endpoint(
+            state,
+            f"Binding · {target_alias} · target endpoint",
+            endpoints,
+            lambda e: _write_attribute(state, alias, source, attribute, target_alias, e),
+        )
+
+    _fetch(state, target_alias, next_step)
+
+
+def _write_attribute(
+    state: State,
+    alias: str,
+    source: EndpointView,
+    attribute: AttributeView,
+    target_alias: str,
+    target: EndpointView,
+) -> None:
+    state.overlay = overlay.Choose(
+        title="Binding · attribute",
+        subject=f"{alias} ep{source.number} {attribute.name}  →  {target_alias} ep{target.number}",
+        options=_writable(target, attribute),
+        on_accept=lambda name: _save(
+            state,
+            {
+                "node": alias,
+                "endpoint": source.number,
+                "type": source.type_name,
+                "attribute": attribute.name,
+            },
+            {
+                "node": target_alias,
+                "endpoint": target.number,
+                "type": target.type_name,
+                "attribute": str(name),
+            },
+            f"binding {alias} {attribute.name} -> {target_alias} {name} saved",
+        ),
+        note="every report of the source writes its value here, as it is",
+    )
+
+
+# --- event → command ----------------------------------------------------------------
 
 
 def _target_node(state: State, alias: str, endpoint: EndpointView, event: str) -> None:
@@ -234,20 +329,21 @@ def _save_binding(
     target: EndpointView,
     command: str,
 ) -> None:
-    entry = {
-        "from": {
-            "node": alias,
-            "endpoint": source.number,
-            "type": source.type_name,
-            "event": event,
-        },
-        "to": {
+    _save(
+        state,
+        {"node": alias, "endpoint": source.number, "type": source.type_name, "event": event},
+        {
             "node": target_alias,
             "endpoint": target.number,
             "type": target.type_name,
             "command": command,
         },
-    }
+        f"binding {alias} {event} -> {target_alias} {command} saved",
+    )
+
+
+def _save(state: State, source: dict[str, Any], target: dict[str, Any], done: str) -> None:
+    entry = {"from": source, "to": target}
 
     def task() -> str:
         view = state.hub.config()
@@ -255,7 +351,7 @@ def _save_binding(
         live.append(entry)
         state.hub.config_set("bindings", live, etag=view.etag)
         state.reload()
-        return f"binding {alias} {event} -> {target_alias} {command} saved"
+        return done
 
     state.worker.submit(task)
 

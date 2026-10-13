@@ -201,7 +201,7 @@ class TestOnlyWhatTheEndpointDeclares:
 
 class TestBindingOnAttributeChange:
     """07-hub.md §3.1 — a command fires on a **change of value**, not on every report; a
-    write fires on every report (zadania/FEAT-13.md N8)."""
+    write fires on every report (zadania/zrobione/FEAT-13.md N8)."""
 
     TRESC = CONFIG.replace(
         "from: { node: kitchen-switch, endpoint: 4, type: KeyInput, event: Click }",
