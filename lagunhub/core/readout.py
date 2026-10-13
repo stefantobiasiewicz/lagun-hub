@@ -221,8 +221,8 @@ class Readout:
     def _finish(self, task: Task, summary: Summary) -> None:
         """One issue entry per readout, not one per attribute (R8).
 
-        The node library lacks several common attributes today (zadania/TASK-01.md), so a
-        simulated node refuses a dozen of them; an entry each would bury the list.
+        A node on a library from before zadania/zrobione/TASK-01.md lacks several common
+        attributes and refuses a dozen of them; an entry each would bury the list.
         """
         node = task.node
         name = node.name or node.uid.hex()

@@ -235,7 +235,7 @@ class TestControl:
         """A device may leave out only what the type calls optional. Refusing a mandatory
         one is the node's fault, and calling it "set by the device itself" would lie
         (zadania/zrobione/FEAT-06.md, R8)."""
-        # The node library's functional endpoints lack `Enabled` today (zadania/TASK-01.md).
+        # As a node on a library from before zadania/zrobione/TASK-01.md: no `Enabled`.
         relay.endpoint(4, Output).spec.pop(CommonAttribute.Enabled)
         with pytest.raises(ApiError) as error:
             hub.api.read("kitchen-relay", 4, "Enabled")

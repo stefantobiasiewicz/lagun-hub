@@ -164,8 +164,8 @@ class TestEverything:
 
 class TestTrouble:
     def test_mandatory_refusals_make_one_issue(self, clock: Clock) -> None:
-        """The node library lacks some common attributes today (zadania/TASK-01.md) — one
-        entry for all of them, not one each (R8)."""
+        """A node on a library from before zadania/zrobione/TASK-01.md lacks some common
+        attributes — one entry for all of them, not one each (R8)."""
         inst, model, node = watched(clock, relay1(uid=bytes(RELAY), address=0, clock=clock))
         spec = node.endpoint(4, Output).spec
         spec.pop(CommonAttribute.Enabled)

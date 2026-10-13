@@ -627,8 +627,9 @@ read_all(node)        Readout: one READ after another ── each reply → mode
   `absent` by `CoreThread._remembering` — for every read, `g` and reconciling included,
   not by each caller. A *mandatory* one refused is the node failing its type, is not put
   in `absent` (the API would then claim the device sets it itself), and goes into **one**
-  issue per readout with every other refusal: the node library lacks several common
-  attributes today (`zadania/TASK-01.md`), and an issue each would bury the list.
+  issue per readout with every other refusal: a node on a library from before
+  `zadania/zrobione/TASK-01.md` lacks several common attributes, and an issue each would
+  bury the list.
 - **Stopped by** removing, blocking or enumerating the node — enumeration builds a new
   model, whoever started it (`Enumerator`'s `on_start`). Refused with `CONFLICT` while
   the node is being enumerated or already read; alongside reconciling it is allowed.
