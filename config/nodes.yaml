@@ -64,7 +64,7 @@ nodes:
     endpoints:
       # The e-paper of segment digits — `lagun-sim epd`, the board devices/apps/epd
       # (zadania/zrobione/DEVICE-04.md). Numbers only, −9.9…199.9 °C and 0.0…99.9 %; a
-      # change reaches the glass at most once a minute, so the board can lag the sensor.
+      # write reaches the glass at once; every 10th refresh flashes the whole glass.
       4:
         type: Display
         name: "Temperature"
