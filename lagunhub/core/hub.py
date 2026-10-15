@@ -475,7 +475,7 @@ class CoreThread(threading.Thread):
             self.ignored += 1  # a group command has no Tid and no reply
             return
         _, tid = decode_header(frame.data[0])
-        self.transactions.track(item.bus, frame.can_id, frame.data, tid)
+        self.transactions.track(item.bus, frame.can_id, frame.data, tid, supersedes=item.supersedes)
         self.handled += 1
 
     def _on_received(self, item: Received) -> None:

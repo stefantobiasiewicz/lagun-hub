@@ -13,7 +13,7 @@ build, not merely forbidden (07-hub.md §4.1).
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from typing import Final
 
 from lagunhub.core.busload import BusCounts
@@ -48,14 +48,16 @@ class BindingEngine:
         snapshot: Snapshot,
         latency: Latency | None = None,
         tids: TidAllocator | None = None,
-        on_sent: Callable[[int, Frame], None] | None = None,
+        on_sent: Callable[[int, Frame, Hashable | None], None] | None = None,
     ) -> None:
         self.buses = list(buses)
         self.snapshot = snapshot
         self.latency = latency or Latency()
         self.tids = tids or TidAllocator()
         self.on_sent = on_sent
-        """Reporting a sent frame to the slow path. CORE minds the transaction."""
+        """Reporting a sent frame to the slow path. CORE minds the transaction. The third
+        argument is the key under which a newer command supersedes an older one still
+        unanswered — set only for a target with arguments from the event (B2)."""
         self.matched = 0
         self.unmatched = 0
         self.sent = 0
@@ -94,6 +96,21 @@ class BindingEngine:
         sent_now = 0
         for target in targets:
             payload = target.payload
+            supersedes: Hashable | None = None
+            if target.splices:
+                # Arguments from the event, byte for byte (07-hub.md §3.2): offsets and
+                # types were settled at load, so here it is a copy of a few bytes and no
+                # decoding (zadania/devices/DEVICE-02.md N1). An event too short for its
+                # own type is a broken node — no command rather than a wrong one.
+                data = frame.data
+                if any(len(data) < start + size for start, _, size in target.splices):
+                    self.dropped += 1
+                    continue
+                filled = bytearray(payload)
+                for start, at, size in target.splices:
+                    filled[at : at + size] = data[start : start + size]
+                payload = bytes(filled)
+                supersedes = (source, target.can_id)
             if target.transactional:
                 # Allocation is shared with CORE and covers the full pool of eight
                 # values. Half the pool would give a limit of four commands per 300 ms
@@ -106,7 +123,7 @@ class BindingEngine:
                 sent_now += 1
                 self.counts.count(target.bus, sent_one)
                 if self.on_sent is not None:
-                    self.on_sent(target.bus, sent_one)
+                    self.on_sent(target.bus, sent_one, supersedes)
             except OSError:
                 # A full send queue (`TransmitQueueFull`) or a bus that is down
                 # (`ENETDOWN`, zadania/zrobione/BUG-04.md) — either way the command did not go

@@ -69,3 +69,18 @@ bindings:
     endpoint: 5
     type: Display
     attribute: Value
+- from:
+    node: kitchen-dial
+    endpoint: 5
+    type: KeyInput
+    event: Click
+  to:
+    node: kitchen-relay
+    endpoint: 4
+    type: Output
+    command: Toggle
+# The knob's value onto a dimmer — an argument taken from the event (07-hub.md §3.2,
+# KONFIGURACJA.md §5). Waits for an output with LEVEL (zadania/devices/DEVICE-03.md):
+# - from: { node: kitchen-dial, endpoint: 4, type: ValueInput, event: Changed }
+#   to:   { node: kitchen-dimmer, endpoint: 4, type: Output, command: SetLevel,
+#           args: { level: $value, transition: 0 } }

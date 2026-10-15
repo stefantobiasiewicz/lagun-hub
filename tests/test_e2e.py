@@ -117,7 +117,9 @@ def build(  # type: ignore[no-untyped-def]
     cold: queue.Queue[ColdItem] = queue.Queue()
     engine = BindingEngine([hub_port], installation.snapshot())
     rx = RxThread([hub_port], engine, cold)
-    engine.on_sent = lambda bus, frame: rx.offer(Sent(bus, frame, clock.now))
+    engine.on_sent = lambda bus, frame, supersedes: rx.offer(
+        Sent(bus, frame, clock.now, supersedes)
+    )
     core = CoreThread(
         installation,
         cold,

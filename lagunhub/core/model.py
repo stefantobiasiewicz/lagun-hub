@@ -327,6 +327,8 @@ class BindingSpec:
     target_uid: Uid | None = None
     group: int | None = None
     args: bytes = b""
+    splices: tuple[tuple[int, int, int], ...] = ()
+    """Arguments from the source event — `TargetRef.splices`."""
     kind: MessageKind = MessageKind.COMMAND
     on_report: bool = False
     """The source is a change of a reported attribute, not an event.
@@ -585,6 +587,15 @@ class Installation:
         node = self.nodes.get(spec.target_uid)
         if node is None or not node.address:
             return ()  # a target without an address — the binding simply does not work
+        missing = self._lacks_feature(node, spec)
+        if missing is not None:
+            # Known from the descriptor, so the file is what is wrong, as with a setting
+            # (LB-HUB-026): no command the node would refuse at every turn of the knob,
+            # and a problem the view shows (zadania/devices/DEVICE-02.md B3). Before
+            # enumeration the hub does not know — the node answers `UNSUPPORTED_FEATURE`.
+            if missing not in self.issues:
+                self.issues.append(missing)
+            return ()
         return (
             Target(
                 bus=node.bus,
@@ -595,7 +606,25 @@ class Installation:
                 transactional=True,
                 label=spec.label,
                 copies_value=spec.kind == MessageKind.WRITE,
+                splices=spec.splices,
             ),
+        )
+
+    @staticmethod
+    def _lacks_feature(node: NodeModel, spec: BindingSpec) -> str | None:
+        """Why the target endpoint cannot carry out the binding's command, or `None`."""
+        if spec.kind != MessageKind.COMMAND:
+            return None
+        present = node.endpoints.get(spec.target_endpoint)
+        if present is None or present.type_id is None:
+            return None
+        definition = CATALOG.get(present.type_id)
+        command = definition.commands.get(spec.target_element) if definition else None
+        if command is None or command.feature is None or present.features & command.feature:
+            return None
+        return (
+            f"binding {spec.source_label} → {spec.label}: {command.name} needs a feature "
+            f"ep{spec.target_endpoint} does not declare — the binding is off"
         )
 
 
@@ -633,6 +662,10 @@ class Target:
     copies_value: bool = False
     """A write: its value is the report that fired it, not ``payload[1:]``
     (07-hub.md §3.2). Fires on every report, not only on a change (§3.1)."""
+    splices: tuple[tuple[int, int, int], ...] = ()
+    """Bytes of the source event copied into ``payload`` — ``(from, to, size)``, both
+    from byte 0 (07-hub.md §3.2). A target with them **supersedes** its own earlier
+    command still unanswered: the newer value wins (zadania/devices/DEVICE-02.md B2)."""
 
 
 @dataclass(frozen=True, slots=True)

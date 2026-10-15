@@ -14,6 +14,7 @@ from tests.node.endpoints.key_input import KeyInput
 from tests.node.endpoints.output import Output
 from tests.node.endpoints.scenes import Scenes
 from tests.node.endpoints.sense import Sense
+from tests.node.endpoints.value_input import ValueInput
 
 __all__ = [
     "Device",
@@ -27,4 +28,5 @@ __all__ = [
     "Scenes",
     "Sense",
     "SystemEndpoint",
+    "ValueInput",
 ]

@@ -133,6 +133,25 @@ który przyjdzie po komendzie, jest ścieżką wolną i też nie jest źródłem
 
 Pętla jest więc niemożliwa do zbudowania, a nie tylko zabroniona.
 
+### 3.2a An argument from the event
+
+A command target may take an argument from the source event (`args: { level: $value }`,
+`07-hub.md` §3.2, `zadania/devices/DEVICE-02.md` N1). Everything that needs thinking is done
+by the loader: the field's and the argument's offsets and types, equal or refused, become
+`Target.splices` — `(from, to, size)`, counted from byte 0 of each payload. The fast path
+then copies a few bytes into the finished frame before it sets the `Tid`; no decoding, no
+lookup, nothing that would show on the latency counter. An event shorter than its type is
+a broken node: no command (`dropped`) rather than a wrong one.
+
+Such a target also hands `on_sent` a key — the source and the target's identifier — and
+`TransactionManager.track` drops the older command of the same key still unanswered
+(`superseded`): its retry would come after the newer value and move the light back (B2).
+Only these targets: a constant `Toggle` lost and retried is a press that happened.
+
+`Installation._compile` leaves out a command whose feature the target's descriptor does
+not declare and says so in the problems (B3) — before enumeration it cannot know, and the
+node answers `UNSUPPORTED_FEATURE`.
+
 ### 3.3 A binding on a report
 
 A reported attribute as the source never reaches the fast path: `Snapshot.on_report` is
@@ -150,8 +169,8 @@ read by CORE in `_fire_report`. Its target is one of two kinds, and they fire di
 The loader keeps such a write honest: its source must be an attribute (an event carries
 no value — before FEAT-13 such a binding sent an empty write the node refused) of the
 same wire type. `<Q>` against `<Q>` passes; whether the two `Quantity` agree is known
-only from the nodes and is **not checked yet** — left, with value-carrying commands
-(`level: $value` from a dial), group targets and queries, to the bindings epic. The
+only from the nodes and is **not checked yet** — left, with group targets and queries,
+to the bindings epic. The
 binding write goes through `_transact`, as an API write does, so the reply lands in the
 model and the view shows what the field shows (the first version went to
 `TransactionManager.request` directly and the view stayed empty — found on the

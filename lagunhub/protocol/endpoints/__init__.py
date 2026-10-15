@@ -20,11 +20,22 @@ from lagunhub.protocol.endpoints.key_input import KEY_INPUT
 from lagunhub.protocol.endpoints.output import OUTPUT
 from lagunhub.protocol.endpoints.scenes import SCENES
 from lagunhub.protocol.endpoints.sense import SENSE
+from lagunhub.protocol.endpoints.value_input import VALUE_INPUT
 from lagunhub.protocol.registry import EndpointType
 
 CATALOG: Final[dict[EndpointType, TypeDef]] = {
     definition.type_id: definition
-    for definition in (DEVICE, DIAGNOSTICS, SCENES, GROUPS, KEY_INPUT, OUTPUT, DISPLAY, SENSE)
+    for definition in (
+        DEVICE,
+        DIAGNOSTICS,
+        SCENES,
+        GROUPS,
+        KEY_INPUT,
+        VALUE_INPUT,
+        OUTPUT,
+        DISPLAY,
+        SENSE,
+    )
 }
 
 
@@ -51,5 +62,6 @@ __all__ = [
     "OUTPUT",
     "SCENES",
     "SENSE",
+    "VALUE_INPUT",
     "by_name",
 ]

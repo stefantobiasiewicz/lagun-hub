@@ -12,6 +12,7 @@ identified — and it lands on the issue list rather than in an exception.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
@@ -36,7 +37,12 @@ from lagunhub.core.config.model import (
 )
 from lagunhub.core.model import Uid, Wanted
 from lagunhub.protocol.endpoints import by_name
-from lagunhub.protocol.endpoints.definition import AttributeDef, encode_fields
+from lagunhub.protocol.endpoints.definition import (
+    QUANTITY_TYPE,
+    AttributeDef,
+    Field,
+    encode_fields,
+)
 from lagunhub.protocol.endpoints.enums import coerce
 from lagunhub.protocol.frame import ADDRESS_NODE_MAX, ADDRESS_NODE_MIN
 from lagunhub.protocol.registry import (
@@ -45,7 +51,7 @@ from lagunhub.protocol.registry import (
     EndpointType,
     MessageKind,
 )
-from lagunhub.protocol.values import SCALARS, Value
+from lagunhub.protocol.values import SCALARS, Value, size_of
 
 FILES = ("hub.yaml", "nodes.yaml", "bindings.yaml")
 
@@ -425,7 +431,84 @@ def _binding(
     for item, target in zip(items, targets, strict=True):
         if target.kind == MessageKind.WRITE:
             _carries_value(raw["from"], item, source)
+    targets = tuple(
+        _with_splices(raw["from"], item, source, target)
+        for item, target in zip(items, targets, strict=True)
+    )
     return BindingConfig(source=source, targets=targets)
+
+
+FROM_EVENT: Final = "$"
+"""An argument written `$value` is the source event's field `value` (07-hub.md §3.2)."""
+
+
+def _references(raw_target: dict[str, Any]) -> dict[str, str]:
+    """`{argument: event field}` for every argument the file writes as `$field`."""
+    given = raw_target.get("args") or {}
+    return {
+        name: value[len(FROM_EVENT) :]
+        for name, value in given.items()
+        if isinstance(value, str) and value.startswith(FROM_EVENT)
+    }
+
+
+def _offsets(fields: tuple[Field, ...]) -> dict[str, tuple[int, str]]:
+    """Each field's offset in its payload and its type. A `<Q>` field has no size
+    until the node's `Quantity` is known, so it cannot be copied by offset — refused."""
+    out: dict[str, tuple[int, str]] = {}
+    offset = 0
+    for f in fields:
+        if f.type == QUANTITY_TYPE:
+            out[f.name] = (-1, f.type)
+            continue  # nothing after it has a fixed offset either
+        out[f.name] = (offset, f.type)
+        offset += size_of(f.type)
+    return out
+
+
+def _with_splices(
+    raw_source: dict[str, Any], raw_target: dict[str, Any], source: SourceRef, target: TargetRef
+) -> TargetRef:
+    """Arguments from the source event, copied byte for byte (07-hub.md §3.2;
+    zadania/devices/DEVICE-02.md N1).
+
+    Checked here so the fast path only copies: the source is an event, the field exists,
+    and it is of the argument's type — the hub converts nothing, as with a write
+    (FEAT-13 N2). Offsets count the event's sequence number and the command's header,
+    byte 0 of each payload. A group command is left out: a value into many targets is
+    the bindings epic's."""
+    references = _references(raw_target)
+    if not references:
+        return target
+    label = source.label
+    if source.on_report:
+        raise ConfigError(
+            f"{label}: an argument from the source (`$…`) needs an event as the source"
+        )
+    if target.kind != MessageKind.COMMAND:
+        raise ConfigError(f"{label}: an argument from the source goes only to a node's command")
+    event = by_name(str(raw_source["type"])).event(str(raw_source["event"]))
+    command = by_name(str(raw_target["type"])).command(str(raw_target["command"]))
+    given = _offsets(event.params)
+    wanted = _offsets(command.args)
+    splices = []
+    for argument, field in references.items():
+        if field not in given:
+            known = ", ".join(given) or "none"
+            raise ConfigError(f"{label}: {event.name} has no field {field!r}; it has: {known}")
+        src, src_type = given[field]
+        dst, dst_type = wanted[argument]
+        if src < 0 or dst < 0:
+            raise ConfigError(
+                f"{label}: ${field} → {argument}: a value typed by Quantity cannot be copied yet"
+            )
+        if src_type != dst_type:
+            raise ConfigError(
+                f"{label}: ${field} is a {src_type} and {argument} a {dst_type} — the hub "
+                "copies the value and converts nothing"
+            )
+        splices.append((1 + src, 1 + dst, size_of(src_type)))
+    return dataclasses.replace(target, splices=tuple(splices))
 
 
 def _carries_value(
@@ -540,7 +623,14 @@ def _target(
 
 
 def _args(fields: tuple[Any, ...], raw: dict[str, Any], *, grouped: bool) -> bytes:
-    given = raw.get("args") or {}
+    given = dict(raw.get("args") or {})
+    references = _references(raw)
+    if references and grouped:
+        raise ConfigError("an argument from the source (`$…`) cannot go to a group command yet")
+    for name in references:
+        if name not in {f.name for f in fields}:
+            raise ConfigError(f"command arguments: unknown argument {name!r}")
+        given[name] = 0  # a place for the event's bytes, filled on the fast path
     try:
         return encode_fields(fields, given, grouped=grouped)
     except ValueError as exc:

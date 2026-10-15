@@ -140,6 +140,7 @@ def _spec(source: tuple[object, int, int], origin: SourceRef, target: TargetRef)
         target_endpoint=target.endpoint,
         target_element=target.element,
         args=target.args,
+        splices=target.splices,
         kind=target.kind,
         on_report=origin.on_report,
         label=target.label,

@@ -132,7 +132,9 @@ def _serve(
             dropped += 1
 
     rx = RxThread(buses, BindingEngine(buses, installation.snapshot()), cold)
-    rx.engine.on_sent = lambda bus, frame: rx.offer(Sent(bus, frame, time.monotonic()))
+    rx.engine.on_sent = lambda bus, frame, supersedes: rx.offer(
+        Sent(bus, frame, time.monotonic(), supersedes)
+    )
 
     def publish(snapshot: Snapshot) -> None:
         rx.engine.snapshot = snapshot

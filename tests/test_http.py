@@ -63,7 +63,9 @@ class Hub:
 
         self.engine = BindingEngine([port], self.installation.snapshot())
         self.rx = RxThread([port], self.engine)
-        self.engine.on_sent = lambda bus, frame: self.rx.offer(Sent(bus, frame, time.monotonic()))
+        self.engine.on_sent = lambda bus, frame, supersedes: self.rx.offer(
+            Sent(bus, frame, time.monotonic(), supersedes)
+        )
 
         def publish(snapshot: Snapshot) -> None:
             self.engine.snapshot = snapshot

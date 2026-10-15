@@ -22,7 +22,7 @@ from __future__ import annotations
 import queue
 import selectors
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass
 
 from lagunhub.core.bindings import BindingEngine
@@ -56,6 +56,9 @@ class Sent:
     bus: int
     frame: Frame
     at: float
+    supersedes: Hashable | None = None
+    """A command from a binding with arguments from the event: the key under which it
+    supersedes the binding's earlier one still unanswered (07-hub.md §3.2, DEVICE-02 B2)."""
 
 
 @dataclass(frozen=True, slots=True)

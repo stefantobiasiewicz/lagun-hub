@@ -13,7 +13,7 @@ itself and **hands over the minding** of retries, because the first one falls du
 from __future__ import annotations
 
 import itertools
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from typing import Final
 
@@ -174,6 +174,12 @@ class TransactionManager:
         self.retried = 0
         self.lost = 0
         self.segmented = 0
+        self.superseded = 0
+        """Commands no longer retried because the same binding sent a newer one (`track`)."""
+
+        self._latest: dict[Hashable, Pending] = {}
+        """The last command of each binding with arguments from the event. Bounded by the
+        bindings: one entry per binding and target."""
 
     def __len__(self) -> int:
         return len(self._pending)
@@ -240,17 +246,35 @@ class TransactionManager:
         *,
         on_done: Callable[[Outcome], None] | None = None,
         send: bool = False,
+        supersedes: Hashable | None = None,
     ) -> Pending:
         """Take over a request **somebody else has already sent**.
 
         This is how commands from the fast path come in: RX sends them itself, because
         it has the time budget for it, while retries are CORE’s business
         (ARCHITEKTURA.md §4.2).
+
+        `supersedes` — a command of a binding with arguments from the event: the
+        binding's earlier command still unanswered is no longer retried (07-hub.md §3.2;
+        zadania/devices/DEVICE-02.md B2). A retried `SetLevel(300)` arriving after
+        `SetLevel(500)` would move the light back to a value nobody wants any more; the
+        newest number is the one that counts, and a lost one is mended by the next turn
+        or the report. Only those bindings: two quick `Toggle`s are two presses, and a
+        lost first one has to be retried.
         """
         now = self._clock()
         pending = Pending(
             bus=bus, can_id=can_id, payload=payload, tid=tid, started=now, on_done=on_done
         )
+        if supersedes is not None:
+            older = self._latest.get(supersedes)
+            if older is not None and self._pending.get(older.key) is older:
+                # Out of the open ones: its timer finds it gone and does nothing, and a
+                # late reply to it is "late", as after the hub gave up.
+                del self._pending[older.key]
+                self.superseded += 1
+                self._finish(older, None, b"")
+            self._latest[supersedes] = pending
         self._pending[pending.key] = pending
         self._closed.pop(pending.key, None)
         self.opened += 1

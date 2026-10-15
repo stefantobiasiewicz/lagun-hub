@@ -273,6 +273,27 @@ value to write) and two attributes of different types (`bool` into `u16`). It do
 **not** check that the two `Quantity` agree: a humidity sensor bound to a °C field shows
 a wrong number, or the field refuses the write. That check comes with the bindings epic.
 
+**An argument from the source event** (`zadania/devices/DEVICE-02.md` N1, 07-hub.md §3.2) —
+a knob dimming a light:
+
+```yaml
+- from: { node: hall-dial,  endpoint: 4, type: ValueInput, event: Changed }
+  to:   { node: hall-light, endpoint: 4, type: Output, command: SetLevel,
+          args: { level: $value, transition: 0 } }
+```
+
+`$value` is the event's field `value`; the other arguments stay constants of the file.
+The bytes are copied as they are, so the field and the argument must be of the same type
+(`Changed.value` `u16` → `SetLevel.level` `u16`; `$delta` `i16` → `Step.delta` `i16`) —
+`$delta` into `level` is refused. Also refused: `$…` with a reported attribute as the
+source (that is a write's job), into a write or a group command, and a field typed by
+`Quantity`. A target whose descriptor lacks the command's feature (`SetLevel` on a relay
+without `LEVEL`) is switched off and named in the problems once the hub has enumerated it.
+
+A newer command of such a binding **supersedes** its older one still unanswered — the hub
+stops retrying it, so a retried `SetLevel(300)` cannot land after `SetLevel(500)`. Commands
+with constant arguments are retried as always: two `Toggle`s are two presses.
+
 I jedna, której **nie wolno** wyrazić: łańcucha. Powiązanie, którego źródłem jest skutek
 innego powiązania, jest zabronione ([`07-hub.md`](../lagunbus-spec/07-hub.md) §4.1) — a w tej
 architekturze jest wręcz niemożliwe do zbudowania
