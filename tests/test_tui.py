@@ -449,6 +449,22 @@ class TestOverlays:
         assert window.key(27) is False
         assert not saved
 
+    def test_arrows_move_the_cursor_and_typing_goes_where_it_is(self) -> None:
+        """`←` `→` used to do nothing: a typo meant erasing everything after it."""
+        saved: list[Any] = []
+        window = overlay.Edit(
+            title="t", subject="s", hint="h", on_accept=saved.append, buffer="1250"
+        )
+        for k in (overlay.KEY_LEFT, overlay.KEY_LEFT, overlay.KEY_BACKSPACE, ord("9")):
+            window.key(k)
+        assert "19▏50" in "\n".join(window.lines())
+        window.key(overlay.KEY_HOME)
+        window.key(overlay.KEY_DC)
+        window.key(overlay.KEY_END)
+        window.key(ord("0"))
+        window.key(10)
+        assert saved == ["9500"]
+
     def test_an_overlay_captures_the_keys(self, state: State) -> None:
         """While a window is on top, `q` types a letter rather than quitting."""
         state.overlay = overlay.Edit(title="t", subject="s", hint="h", on_accept=lambda _: None)
@@ -579,9 +595,10 @@ class TestCommandPicker:
         actions.send_command(expanded, "kitchen-relay", endpoint)
         assert isinstance(expanded.overlay, overlay.Choose)
         expanded.overlay.key(10)
-        assert isinstance(expanded.overlay, overlay.Edit)
-        assert "level: u16 0…65535" in expanded.overlay.hint
-        assert expanded.overlay.buffer == "level=0"
+        assert isinstance(expanded.overlay, overlay.Form)
+        assert [(f.name, f.hint, f.value) for f in expanded.overlay.fields] == [
+            ("level", "u16 0…65535", "0")
+        ]
 
 
 class TestQuestionChain:
@@ -600,8 +617,8 @@ class TestQuestionChain:
         assert isinstance(expanded.overlay, overlay.Choose), "the command choice"
 
         app.key(expanded, 10)
-        assert isinstance(expanded.overlay, overlay.Edit), "and then the question about arguments"
-        assert expanded.overlay.buffer == "duration=0"
+        assert isinstance(expanded.overlay, overlay.Form), "and then the question about arguments"
+        assert expanded.overlay.values == {"duration": "0"}
 
     def test_a_device_command_runs_to_the_end(self, expanded: State) -> None:
         expanded.enter()
@@ -1169,3 +1186,78 @@ class TestWhichAttributesAreShown:
             number=4, attributes=(self.field(name="Text", available=False, wanted="hi"),)
         )
         assert [a.name for a in panes.worth_showing(endpoint)] == ["Text"]
+
+
+class TestArgumentForm:
+    """A command's arguments one field a line (2026-10-17, DEVICE-03): changing the blue
+    of a `SetColor` is going down to `b` and typing it, not retyping the whole colour."""
+
+    def _set_color(self) -> tuple[overlay.Form, list[Any]]:
+        sent: list[Any] = []
+        colour = (("r", "254"), ("g", "128"), ("b", "0"), ("w", "0"))
+        fields = (
+            *(overlay.Field(name, "u8 0…254", value) for name, value in colour),
+            overlay.Field("transition", "u16", "0"),
+        )
+        form = overlay.Form(title="t", subject="s", fields=fields, on_accept=sent.append)
+        return form, sent
+
+    def test_one_field_changes_and_the_others_stay(self) -> None:
+        form, sent = self._set_color()
+        form.key(overlay.KEY_DOWN)
+        form.key(overlay.KEY_DOWN)
+        form.key(overlay.KEY_BACKSPACE)
+        for c in "200":
+            form.key(ord(c))
+        form.key(10)
+        assert sent == [{"r": "254", "g": "128", "b": "200", "w": "0", "transition": "0"}]
+
+    def test_tab_and_up_wrap_around(self) -> None:
+        form, _ = self._set_color()
+        form.key(overlay.KEY_UP)
+        assert form.cursor == 4, "up from the first is the last"
+        form.key(overlay.TAB)
+        assert form.cursor == 0
+
+    def test_the_cursor_is_drawn_only_in_the_field_being_edited(self) -> None:
+        form, _ = self._set_color()
+        rows = [line for line in form.lines() if "u8" in line or "u16" in line]
+        assert "▸" in rows[0] and "254▏" in rows[0]
+        assert all("▏" not in row and "▸" not in row for row in rows[1:])
+
+    def test_set_color_opens_at_the_colour_the_light_has(self, expanded: State) -> None:
+        from lagunhub.adapters.tui import actions
+        from lagunhub.api import ArgView, CommandView
+
+        def attr(name: str, value: int) -> AttributeView:
+            return AttributeView(id=0, name=name, type="u8", access="RO", value=value)
+
+        light = replace(
+            EP4,
+            attributes=(attr("Red", 254), attr("Green", 128), attr("Blue", 0), attr("White", 0)),
+            commands=(
+                CommandView(
+                    name="SetColor",
+                    args=(
+                        *(ArgView(name=n, type="u8", lo=0, hi=254) for n in "rgbw"),
+                        ArgView(name="transition", type="u16", lo=0, hi=65534),
+                    ),
+                ),
+            ),
+        )
+        actions.send_command(expanded, "kitchen-strip", light)
+        assert isinstance(expanded.overlay, overlay.Choose)
+        expanded.overlay.key(10)
+        assert isinstance(expanded.overlay, overlay.Form)
+        assert expanded.overlay.values == {
+            "r": "254",
+            "g": "128",
+            "b": "0",
+            "w": "0",
+            "transition": "0",
+        }
+
+    def test_esc_sends_nothing(self) -> None:
+        form, sent = self._set_color()
+        assert form.key(27) is False
+        assert not sent

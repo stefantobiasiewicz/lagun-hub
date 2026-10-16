@@ -39,14 +39,15 @@ def send_command(state: State, ref: str, endpoint: EndpointView) -> None:
         if not meta.args:
             _send(state, ref, endpoint.number, meta.name, {})
             return
-        state.overlay = overlay.Edit(
+        state.overlay = overlay.Form(
             title=f"{meta.name} — arguments",
             subject=f"{ref} · ep{endpoint.number} · {meta.name}",
-            hint="  ".join(_argument_hint(a) for a in meta.args),
-            buffer=" ".join(f"{a.name}={_default(a)}" for a in meta.args),
-            note="written `name=value`, separated by spaces",
-            on_accept=lambda text: _send(
-                state, ref, endpoint.number, meta.name, _arguments(str(text))
+            fields=tuple(
+                overlay.Field(a.name, _argument_hint(a), _now(endpoint, a.name) or _default(a))
+                for a in meta.args
+            ),
+            on_accept=lambda values: _send(
+                state, ref, endpoint.number, meta.name, _arguments(values)
             ),
         )
 
@@ -68,20 +69,26 @@ def _left_out(all_of: tuple[CommandView, ...]) -> str:
 
 def _argument_hint(arg: Any) -> str:
     span = f" {arg.lo}…{arg.hi}" if arg.lo is not None else ""
-    return f"{arg.name}: {arg.type}{span}"
+    return f"{arg.type}{span}"
+
+
+NOW: Final = {"level": "Level", "r": "Red", "g": "Green", "b": "Blue", "w": "White"}
+"""An argument that sets an attribute starts from that attribute's value: `SetColor` opens
+at the colour the light has, so changing the blue is one field (DEVICE-03)."""
+
+
+def _now(endpoint: EndpointView, arg: str) -> str:
+    name = NOW.get(arg)
+    value = next((a.value for a in endpoint.attributes if a.name == name), None)
+    return str(value) if isinstance(value, int) and not isinstance(value, bool) else ""
 
 
 def _default(arg: Any) -> str:
     return "0" if arg.lo is None or arg.lo <= 0 <= (arg.hi or 0) else str(arg.lo)
 
 
-def _arguments(text: str) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for pair in text.split():
-        name, _, value = pair.partition("=")
-        if name:
-            out[name] = _number(value)
-    return out
+def _arguments(values: dict[str, str]) -> dict[str, Any]:
+    return {name: _number(text.strip()) for name, text in values.items()}
 
 
 def _send(state: State, ref: str, endpoint: int, name: str, args: dict[str, Any]) -> None:

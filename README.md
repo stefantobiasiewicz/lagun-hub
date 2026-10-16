@@ -309,7 +309,7 @@ i token bierze sam z `config/`, więc zwykle wystarcza `lagun-hub tui`; inaczej
 | `←` / `⌫` / `Esc` | z powrotem; na samej górze nie robi nic |
 | `⇥` | następna sekcja (jedyny ruch, który przeskakuje kontekst) |
 | `t` `o` `f` | Toggle / On / Off na wybranym wyjściu |
-| `c` | wyślij dowolną komendę — z listy, z argumentami |
+| `c` | wyślij dowolną komendę — z listy; argumenty w formularzu, każdy w osobnym polu (`↑` `↓` `Tab` pole, `←` `→` kursor) |
 | `i` | Identify — która to puszka |
 | `n` `N` | nazwa / alias węzła (idą do pliku) |
 | `e` `w` | edytuj **w pliku** / nastaw **w węźle** |
