@@ -256,7 +256,7 @@ class TransactionManager:
 
         `supersedes` — a command of a binding with arguments from the event: the
         binding's earlier command still unanswered is no longer retried (07-hub.md §3.2;
-        zadania/devices/DEVICE-02.md B2). A retried `SetLevel(300)` arriving after
+        zadania/zrobione/DEVICE-02.md B2). A retried `SetLevel(300)` arriving after
         `SetLevel(500)` would move the light back to a value nobody wants any more; the
         newest number is the one that counts, and a lost one is mended by the next turn
         or the report. Only those bindings: two quick `Toggle`s are two presses, and a

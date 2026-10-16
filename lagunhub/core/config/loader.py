@@ -470,7 +470,7 @@ def _with_splices(
     raw_source: dict[str, Any], raw_target: dict[str, Any], source: SourceRef, target: TargetRef
 ) -> TargetRef:
     """Arguments from the source event, copied byte for byte (07-hub.md §3.2;
-    zadania/devices/DEVICE-02.md N1).
+    zadania/zrobione/DEVICE-02.md N1).
 
     Checked here so the fast path only copies: the source is an event, the field exists,
     and it is of the argument's type — the hub converts nothing, as with a write

@@ -1,5 +1,5 @@
 """A knob dims a light: a binding event → command whose argument is a field of the event
-(07-hub.md §3.2; zadania/devices/DEVICE-02.md N1, B2).
+(07-hub.md §3.2; zadania/zrobione/DEVICE-02.md N1, B2).
 
 `ValueInput.Changed.value` goes into `Output.SetLevel.level` byte for byte — the scale is
 the same ‰ on both sides, so there is nothing to convert. Offsets and types are settled
@@ -143,7 +143,7 @@ def test_the_value_is_copied_and_the_constant_stays(tmp_path: Path) -> None:
 def test_a_newer_value_supersedes_an_unanswered_one(tmp_path: Path) -> None:
     """The light does not answer the first command; the second comes before its retry.
     The first is not retried — it would arrive after the second and move the light back
-    (zadania/devices/DEVICE-02.md B2)."""
+    (zadania/zrobione/DEVICE-02.md B2)."""
     r = rig(tmp_path)
     r.relay.faults.drop_responses = 1
     knob(r).turn(10)  # 200 ‰, answered never
@@ -169,7 +169,7 @@ def test_an_unanswered_value_alone_is_retried(tmp_path: Path) -> None:
 
 def test_set_level_on_an_output_without_level_is_off(tmp_path: Path) -> None:
     """The descriptor says the output cannot dim: the binding sends nothing, and the
-    problem is said (zadania/devices/DEVICE-02.md B3)."""
+    problem is said (zadania/zrobione/DEVICE-02.md B3)."""
     r = rig(tmp_path, dimmer_features=0)
     knob(r).turn(3)
     r.run(0.2)

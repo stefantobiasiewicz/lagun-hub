@@ -136,7 +136,7 @@ Pętla jest więc niemożliwa do zbudowania, a nie tylko zabroniona.
 ### 3.2a An argument from the event
 
 A command target may take an argument from the source event (`args: { level: $value }`,
-`07-hub.md` §3.2, `zadania/devices/DEVICE-02.md` N1). Everything that needs thinking is done
+`07-hub.md` §3.2, `zadania/zrobione/DEVICE-02.md` N1). Everything that needs thinking is done
 by the loader: the field's and the argument's offsets and types, equal or refused, become
 `Target.splices` — `(from, to, size)`, counted from byte 0 of each payload. The fast path
 then copies a few bytes into the finished frame before it sets the `Tid`; no decoding, no

@@ -4,7 +4,7 @@ pair, a slider (types/0x0011-value-input.md).
 The type describes the **value**, not the finger (zadania/zrobione/CR-04.md): no features,
 no hold, no debounce. `Value` is in ‰ like `Output.Level`, so a binding is a copy, not a
 conversion (§5.1) — `Changed.value` goes into `SetLevel.level` as it is
-(07-hub.md §3.2, zadania/devices/DEVICE-02.md N1).
+(07-hub.md §3.2, zadania/zrobione/DEVICE-02.md N1).
 
 Two rules between attributes the table cannot say: `MinValue ≤ MaxValue`, and `Value`
 within them. The node enforces both (`INVALID_VALUE`, and a narrowed range clips `Value`,

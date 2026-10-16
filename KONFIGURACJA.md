@@ -273,7 +273,7 @@ value to write) and two attributes of different types (`bool` into `u16`). It do
 **not** check that the two `Quantity` agree: a humidity sensor bound to a °C field shows
 a wrong number, or the field refuses the write. That check comes with the bindings epic.
 
-**An argument from the source event** (`zadania/devices/DEVICE-02.md` N1, 07-hub.md §3.2) —
+**An argument from the source event** (`zadania/zrobione/DEVICE-02.md` N1, 07-hub.md §3.2) —
 a knob dimming a light:
 
 ```yaml

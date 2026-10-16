@@ -3,7 +3,7 @@
 The double turns like the knob in `lagunbus-node` (`types/value_input.c`) does, minus
 the storing: a step past a limit reaches it, at the limit nothing is said, with `Wrap`
 only a step FROM a limit wraps, and `delta` is arithmetic
-(types/0x0011-value-input.md §5.2; zadania/devices/DEVICE-02.md S2). Several steps at
+(types/0x0011-value-input.md §5.2; zadania/zrobione/DEVICE-02.md S2). Several steps at
 once are one `Changed` (N11). A narrowed range clips `Value` (S1).
 """
 

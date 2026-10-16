@@ -98,7 +98,7 @@ nodes:
       # the encoder's value on ep4, the key in its shaft on ep5, one channel.
       # bindings.yaml toggles kitchen-relay with the shaft's click; the value would dim a
       # light with `SetLevel(level: $value)`, but no light here has LEVEL yet
-      # (zadania/devices/DEVICE-02.md B4).
+      # (zadania/zrobione/DEVICE-02.md B4).
       4:
         type: ValueInput
         name: "Brightness"

@@ -100,7 +100,7 @@ class BindingEngine:
             if target.splices:
                 # Arguments from the event, byte for byte (07-hub.md §3.2): offsets and
                 # types were settled at load, so here it is a copy of a few bytes and no
-                # decoding (zadania/devices/DEVICE-02.md N1). An event too short for its
+                # decoding (zadania/zrobione/DEVICE-02.md N1). An event too short for its
                 # own type is a broken node — no command rather than a wrong one.
                 data = frame.data
                 if any(len(data) < start + size for start, _, size in target.splices):

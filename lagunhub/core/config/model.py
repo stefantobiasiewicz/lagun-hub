@@ -164,7 +164,7 @@ class TargetRef:
     `size` bytes at `from` in the event's payload go to `to` in the command's payload,
     both counted from byte 0, the sequence number and the header. Empty: every argument
     is the file's constant. Worked out at load, so the fast path only copies bytes
-    (zadania/devices/DEVICE-02.md N1)."""
+    (zadania/zrobione/DEVICE-02.md N1)."""
 
 
 @dataclass(frozen=True, slots=True)

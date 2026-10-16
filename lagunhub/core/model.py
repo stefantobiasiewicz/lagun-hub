@@ -591,7 +591,7 @@ class Installation:
         if missing is not None:
             # Known from the descriptor, so the file is what is wrong, as with a setting
             # (LB-HUB-026): no command the node would refuse at every turn of the knob,
-            # and a problem the view shows (zadania/devices/DEVICE-02.md B3). Before
+            # and a problem the view shows (zadania/zrobione/DEVICE-02.md B3). Before
             # enumeration the hub does not know — the node answers `UNSUPPORTED_FEATURE`.
             if missing not in self.issues:
                 self.issues.append(missing)
@@ -665,7 +665,7 @@ class Target:
     splices: tuple[tuple[int, int, int], ...] = ()
     """Bytes of the source event copied into ``payload`` — ``(from, to, size)``, both
     from byte 0 (07-hub.md §3.2). A target with them **supersedes** its own earlier
-    command still unanswered: the newer value wins (zadania/devices/DEVICE-02.md B2)."""
+    command still unanswered: the newer value wins (zadania/zrobione/DEVICE-02.md B2)."""
 
 
 @dataclass(frozen=True, slots=True)
