@@ -96,9 +96,8 @@ nodes:
     endpoints:
       # A knob (types/0x0011-value-input.md) — `lagun-sim dial`, the board devices/apps/dial:
       # the encoder's value on ep4, the key in its shaft on ep5, one channel.
-      # bindings.yaml toggles kitchen-relay with the shaft's click; the value would dim a
-      # light with `SetLevel(level: $value)`, but no light here has LEVEL yet
-      # (zadania/zrobione/DEVICE-02.md B4).
+      # bindings.yaml toggles kitchen-relay with the shaft's click, and dims kitchen-strip
+      # with the value: `SetLevel(level: $value)` (zadania/zrobione/DEVICE-02.md B4).
       4:
         type: ValueInput
         name: "Brightness"
@@ -106,3 +105,16 @@ nodes:
       5:
         type: KeyInput
         name: "Shaft key"
+  "6061626364656667":
+    alias: kitchen-strip
+    name: "The light over the counter"
+    room: kitchen
+    endpoints:
+      # Eight WS2812 as one colour light (types/0x0020-output.md, LEVEL | COLOR_RGB) —
+      # `lagun-sim rgb8`, the board devices/apps/rgb8 (zadania/devices/DEVICE-03.md).
+      # kitchen-dial dims it (bindings.yaml); the colour is SetColor's, from the view (`c`).
+      4:
+        type: Output
+        name: "Counter light"
+        Purpose: LIGHT
+        DefaultFadeTime: 400

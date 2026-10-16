@@ -650,6 +650,9 @@ def traffic_row(item: TrafficView) -> tuple[str, int]:
 
 def _summary(e: EndpointView) -> str:
     """The endpoint’s most important value, in one piece."""
+    light = _light(e)
+    if light is not None:
+        return light
     # A display field: its number, else its text, else `Content = NONE` — an empty text
     # is nothing to show, not a value (types/0x0022-display.md §5.1).
     for name in ("OnOff", "Value", "Text", "Purpose", "EventMode", "Content"):
@@ -657,6 +660,29 @@ def _summary(e: EndpointView) -> str:
         if meta is not None and meta.value not in (None, ""):
             return f"{name} = {_val(meta.value, meta.label)}"
     return MISSING
+
+
+def _light(e: EndpointView) -> str | None:
+    """A light in one line — `on · 62.5 % · #FF8000`, `fading` while a transition runs.
+
+    `OnOff` alone said nothing about a dimmer, and three numbers 0–255 in the attribute
+    list are not a colour to the eye. The colour is shown when dark too: it is persistent
+    and what `On` will light in (types/0x0020-output.md §5.8). `None` for anything that
+    is not an `Output` with a known `Level` — a relay keeps its `OnOff = yes`."""
+    values = {a.name: a.value for a in e.attributes}
+    level = values.get("Level")
+    if e.type_name != "Output" or not isinstance(level, int):
+        return None
+    parts = ["on" if level > 0 else "off", f"{level / 10:g} %"]
+    rgb = [values.get(name) for name in ("Red", "Green", "Blue")]
+    if all(isinstance(c, int) for c in rgb):
+        parts.append("#" + "".join(f"{c:02X}" for c in rgb))
+        white = values.get("White")
+        if isinstance(white, int) and white:
+            parts.append(f"W {white}")
+    if values.get("Transitioning") is True:
+        parts.append("fading")
+    return " · ".join(parts)
 
 
 def _agreement(a: AttributeView) -> str:

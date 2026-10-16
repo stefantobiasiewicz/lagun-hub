@@ -77,10 +77,16 @@ OUTPUT: Final = TypeDef(
     attributes={
         ON_OFF: A(ON_OFF, "OnOff", "bool", "RO", reported=True),
         LEVEL: A(LEVEL, "Level", "u16", "RO", reported=True, hi=1000, feature=_LVL),
-        RED: A(RED, "Red", "u8", "RO", reported=True, feature=_RGB),
-        GREEN: A(GREEN, "Green", "u8", "RO", reported=True, feature=_RGB),
-        BLUE: A(BLUE, "Blue", "u8", "RO", reported=True, feature=_RGB),
-        WHITE: A(WHITE, "White", "u8", "RO", reported=True, feature=_RGB),
+        # The colour at full brightness, independent of Level; persistent and white after a
+        # factory reset, so that `On` after a power cut does not light up black. 0–254 like
+        # every u8 — 0xFF is "absent" (types/0x0020-output.md §5.8; DECYZJE.md "Output:
+        # barwa niezależna od jasności").
+        RED: A(RED, "Red", "u8", "RO", reported=True, persist=True, default=254, feature=_RGB),
+        GREEN: A(
+            GREEN, "Green", "u8", "RO", reported=True, persist=True, default=254, feature=_RGB
+        ),
+        BLUE: A(BLUE, "Blue", "u8", "RO", reported=True, persist=True, default=254, feature=_RGB),
+        WHITE: A(WHITE, "White", "u8", "RO", reported=True, persist=True, feature=_RGB),
         COLOR_TEMPERATURE: A(
             COLOR_TEMPERATURE,
             "ColorTemperature",
