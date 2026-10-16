@@ -71,6 +71,15 @@ class CommandView:
 
 
 @dataclass(frozen=True, slots=True)
+class EventTypeView:
+    """An event the endpoint's type emits, with its fields — what a binding can take an
+    argument from (`level: $value`, 07-hub.md §3.2). Not `EventView`, the live event."""
+
+    name: str
+    fields: tuple[ArgView, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class EndpointView:
     number: int
     type_id: int | None = None
@@ -84,6 +93,8 @@ class EndpointView:
     attributes: tuple[AttributeView, ...] = ()
     commands: tuple[CommandView, ...] = ()
     events: tuple[str, ...] = ()
+    event_types: tuple[EventTypeView, ...] = ()
+    """`events` with their fields; the names alone stay for whoever only lists them."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -19,7 +19,7 @@ from typing import Any, Final
 
 from lagunhub.adapters.tui import overlay
 from lagunhub.adapters.tui.state import State
-from lagunhub.api import AttributeView, CommandView, EndpointView, NodeSummary, NodeView
+from lagunhub.api import ArgView, AttributeView, CommandView, EndpointView, NodeSummary, NodeView
 
 Next = Callable[[Any], None]
 
@@ -311,19 +311,76 @@ def _target_command(
     target_alias: str,
     target: EndpointView,
 ) -> None:
-    available_ones = tuple(c.name for c in target.commands if c.available and not c.args)
-    if not available_ones:
-        state.say("! this endpoint only has commands with arguments — we do not bind those yet")
+    commands = {c.name: c for c in target.commands if c.available}
+    if not commands:
+        state.say(f"! {target_alias} ep{target.number} takes no command this endpoint has")
         return
+    subject = f"{alias} ep{source.number} {event}  →  {target_alias} ep{target.number}"
+
+    def chosen(name: Any) -> None:
+        command = commands[str(name)]
+        if not command.args:
+            _save_binding(state, alias, source, event, target_alias, target, command.name, {})
+            return
+        _binding_arguments(
+            state,
+            f"{subject} {command.name}",
+            _event_fields(source, event),
+            command,
+            lambda args: _save_binding(
+                state, alias, source, event, target_alias, target, command.name, args
+            ),
+        )
+
     state.overlay = overlay.Choose(
         title="Binding · command",
-        subject=f"{alias} ep{source.number} {event}  →  {target_alias} ep{target.number}",
-        options=available_ones,
-        on_accept=lambda command: _save_binding(
-            state, alias, source, event, target_alias, target, str(command)
+        subject=subject,
+        options=tuple(commands),
+        on_accept=chosen,
+        note="a command with arguments asks for them next — a constant, or $field of the event",
+    )
+
+
+def _event_fields(source: EndpointView, event: str) -> tuple[ArgView, ...]:
+    shape = next((e for e in source.event_types if e.name == event), None)
+    return shape.fields if shape else ()
+
+
+def _binding_arguments(
+    state: State,
+    subject: str,
+    fields: tuple[ArgView, ...],
+    command: CommandView,
+    save: Callable[[dict[str, Any]], None],
+) -> None:
+    """Each argument a constant or `$field` of the source event (07-hub.md §3.2). The hub
+    copies a field byte for byte and converts nothing, so only a field of the argument's
+    own type is offered — `$value` (u16) for `level` (u16), never for `r` (u8). Only the
+    FIRST argument starts from such a field, when there is exactly one: it is what a
+    command is about (`SetLevel.level`, `Step.delta`), while the rest are how
+    (`transition`) — a fade as long as the knob's value is nobody's intent. The knob's
+    `Changed` into `SetLevel` is then `level = $value`, `transition = 0` without typing."""
+
+    def matching(arg: ArgView) -> list[str]:
+        return [f"${f.name}" for f in fields if f.type == arg.type]
+
+    def start(arg: ArgView, first: bool) -> str:
+        same = matching(arg)
+        return same[0] if first and len(same) == 1 else _default(arg)
+
+    def hint(arg: ArgView) -> str:
+        same = matching(arg)
+        return _argument_hint(arg) + (f"  or {', '.join(same)}" if same else "")
+
+    state.overlay = overlay.Form(
+        title="Binding · arguments",
+        subject=subject,
+        fields=tuple(
+            overlay.Field(a.name, hint(a), start(a, i == 0)) for i, a in enumerate(command.args)
         ),
-        note="commands with arguments are added in the file — there would be too much to ask "
-        "for here",
+        on_accept=lambda values: save(_arguments(values)),
+        accept="save",
+        note="$field is copied from the event as it is — the hub converts nothing",
     )
 
 
@@ -335,16 +392,20 @@ def _save_binding(
     target_alias: str,
     target: EndpointView,
     command: str,
+    args: dict[str, Any],
 ) -> None:
+    to: dict[str, Any] = {
+        "node": target_alias,
+        "endpoint": target.number,
+        "type": target.type_name,
+        "command": command,
+    }
+    if args:
+        to["args"] = args
     _save(
         state,
         {"node": alias, "endpoint": source.number, "type": source.type_name, "event": event},
-        {
-            "node": target_alias,
-            "endpoint": target.number,
-            "type": target.type_name,
-            "command": command,
-        },
+        to,
         f"binding {alias} {event} -> {target_alias} {command} saved",
     )
 

@@ -19,16 +19,20 @@ from typing import Any
 
 import pytest
 
-from lagunhub.adapters.tui import app, overlay, panes, screen
+from lagunhub.adapters.tui import actions, app, overlay, panes, screen
 from lagunhub.adapters.tui.state import Feed, Focus, Section, State
 from lagunhub.api import (
+    ArgView,
     AttributeView,
     BindingView,
     BusSetupView,
     BusView,
     ChangeView,
+    CommandView,
     CommissioningView,
     ConfigView,
+    EndpointView,
+    EventTypeView,
     HealthView,
     JoinView,
     NodeSummary,
@@ -1261,3 +1265,82 @@ class TestArgumentForm:
         form, sent = self._set_color()
         assert form.key(27) is False
         assert not sent
+
+
+class TestBindingWithArguments:
+    """The knob's `Changed` into the light's `SetLevel(level: $value)` from the wizard
+    (2026-10-17, DEVICE-03): before, the wizard offered commands without arguments only,
+    and a step that ended with a message closed the window without a word."""
+
+    KNOB = EndpointView(
+        number=4,
+        type_name="ValueInput",
+        events=("Changed",),
+        event_types=(
+            EventTypeView(
+                "Changed", (ArgView(name="value", type="u16"), ArgView(name="delta", type="i16"))
+            ),
+        ),
+    )
+    LIGHT = EndpointView(
+        number=4,
+        type_name="Output",
+        commands=(
+            CommandView(name="On"),
+            CommandView(
+                name="SetLevel",
+                args=(
+                    ArgView(name="level", type="u16", lo=0, hi=65534),
+                    ArgView(name="transition", type="u16", lo=0, hi=65534),
+                ),
+            ),
+            CommandView(
+                name="SetColor",
+                args=(
+                    *(ArgView(name=n, type="u8", lo=0, hi=254) for n in "rgbw"),
+                    ArgView(name="transition", type="u16", lo=0, hi=65534),
+                ),
+            ),
+        ),
+    )
+
+    def _to(self, state: State, command: str) -> overlay.Form:
+        actions._target_command(
+            state, "kitchen-dial", self.KNOB, "Changed", "kitchen-strip", self.LIGHT
+        )
+        assert isinstance(state.overlay, overlay.Choose)
+        assert command in state.overlay.options, "commands with arguments are offered too"
+        state.overlay.cursor = list(state.overlay.options).index(command)
+        app.key(state, 10)
+        assert isinstance(state.overlay, overlay.Form)
+        return state.overlay
+
+    def test_set_level_takes_the_value_without_typing(self, state: State) -> None:
+        form = self._to(state, "SetLevel")
+        assert form.values == {"level": "$value", "transition": "0"}
+        assert "$value" in form.fields[1].hint, "offered, not filled in: a fade is not a knob"
+        app.key(state, 10)
+        _run(state)
+        write = next(c for c in _fake(state).calls if c[0] == "config_set")
+        assert write[1][1][-1]["to"] == {
+            "node": "kitchen-strip",
+            "endpoint": 4,
+            "type": "Output",
+            "command": "SetLevel",
+            "args": {"level": "$value", "transition": 0},
+        }
+
+    def test_a_field_of_another_type_is_not_offered(self, state: State) -> None:
+        """`value` is a u16 and `r` a u8 — the hub converts nothing."""
+        form = self._to(state, "SetColor")
+        assert form.values["r"] == "0"
+        assert "$value" not in form.fields[0].hint
+        assert "$value" in form.fields[4].hint, "transition is a u16"
+
+    def test_a_message_from_a_step_in_the_worker_stays(self, state: State) -> None:
+        def step() -> str:
+            state.say("! kitchen-strip has no endpoint that takes commands")
+            return ""
+
+        state._done(step())
+        assert state.status.startswith("! kitchen-strip")

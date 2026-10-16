@@ -183,7 +183,7 @@ class State:
 
         self.dirty = True
         self.stopping = threading.Event()
-        self.worker = Worker(self.say)
+        self.worker = Worker(self._done)
         self._threads = [
             threading.Thread(target=self._refresh_loop, name="tui-refresh", daemon=True),
             threading.Thread(target=self._feed_loop, name="tui-feed", daemon=True),
@@ -203,6 +203,16 @@ class State:
     def say(self, text: str) -> None:
         self.status = text
         self.dirty = True
+
+    def _done(self, text: str) -> None:
+        """What a task returned. Empty says nothing — and must not wipe what the task
+        said itself: a wizard step that fetches a node runs in the worker, and its
+        `! … has no endpoint that takes commands` vanished under the task's `""`, so the
+        window closed without a word (2026-10-17)."""
+        if text:
+            self.say(text)
+        else:
+            self.dirty = True
 
     # --- the feeding threads ------------------------------------------------------
 

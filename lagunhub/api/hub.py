@@ -54,6 +54,7 @@ from lagunhub.api.views import (
     DiffRow,
     EndpointView,
     EnumerateView,
+    EventTypeView,
     EventView,
     HealthView,
     HubInfo,
@@ -828,6 +829,17 @@ class HubApi:
             attributes=self._attributes(model, definition, description),
             commands=self._commands(definition, model),
             events=tuple(e.name for e in definition.events.values()) if definition else (),
+            event_types=tuple(
+                EventTypeView(
+                    name=e.name,
+                    fields=tuple(
+                        ArgView(name=f.name, type=_arg_type(f, quantity)) for f in e.params
+                    ),
+                )
+                for e in definition.events.values()
+            )
+            if definition
+            else (),
         )
 
     def _commands(
