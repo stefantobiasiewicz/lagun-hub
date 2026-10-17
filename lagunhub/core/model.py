@@ -342,6 +342,11 @@ class BindingSpec:
     label: str = ""
     """A description of **the target**: "kitchen-relay ep4 Output.Toggle"."""
 
+    source_name: str = ""
+    """The source event's or attribute's name, `target_name` the command's or
+    attribute's — as the file writes them (`SourceRef.name`)."""
+    target_name: str = ""
+
     source_label: str = ""
     """A description of the **source**. A field of its own, because one binding has two
     ends and both have to be nameable — otherwise the bindings view shows the target

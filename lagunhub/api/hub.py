@@ -937,11 +937,11 @@ class HubApi:
     def _bindings(self, inst: Installation) -> tuple[BindingView, ...]:
         aliases = {uid: w.alias for uid, w in inst.wanted.items()}
         out: dict[tuple[Uid, int, int, bool], list[TargetView]] = {}
-        labels: dict[tuple[Uid, int, int, bool], str] = {}
+        labels: dict[tuple[Uid, int, int, bool], tuple[str, str]] = {}
         for spec in inst.bindings:
             uid, endpoint, element = spec.source
             key = (uid, endpoint, element, spec.on_report)
-            labels.setdefault(key, spec.source_label)
+            labels.setdefault(key, (spec.source_label, spec.source_name))
             cel = inst.nodes.get(spec.target_uid) if spec.target_uid else None
             out.setdefault(key, []).append(
                 TargetView(
@@ -952,6 +952,7 @@ class HubApi:
                     alias=aliases.get(spec.target_uid, "") if spec.target_uid else "",
                     group=spec.group,
                     label=spec.label,
+                    name=spec.target_name,
                     active=bool(inst.group_buses(spec.group))
                     if spec.group is not None
                     else bool(cel and cel.address),
@@ -964,7 +965,8 @@ class HubApi:
                 source_endpoint=endpoint,
                 source_element=element,
                 on_report=on_report,
-                label=labels[(uid, endpoint, element, on_report)],
+                label=labels[(uid, endpoint, element, on_report)][0],
+                source_name=labels[(uid, endpoint, element, on_report)][1],
                 targets=tuple(targets),
             )
             for (uid, endpoint, element, on_report), targets in out.items()

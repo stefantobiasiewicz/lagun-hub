@@ -146,6 +146,9 @@ class SourceRef:
     element: int
     on_report: bool = False
     label: str = ""
+    name: str = ""
+    """The event's, attribute's or command's name as the file writes it — what picks the
+    one entry out of the file when a person removes it (2026-10-17)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +162,8 @@ class TargetRef:
     element: int = 0
     args: bytes = b""
     label: str = ""
+    name: str = ""
+    """The command or attribute name — `SourceRef.name`."""
     splices: tuple[tuple[int, int, int], ...] = ()
     """Arguments taken from the source event (07-hub.md §3.2): ``(from, to, size)`` —
     `size` bytes at `from` in the event's payload go to `to` in the command's payload,

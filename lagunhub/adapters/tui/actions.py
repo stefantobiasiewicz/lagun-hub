@@ -19,7 +19,16 @@ from typing import Any, Final
 
 from lagunhub.adapters.tui import overlay
 from lagunhub.adapters.tui.state import State
-from lagunhub.api import ArgView, AttributeView, CommandView, EndpointView, NodeSummary, NodeView
+from lagunhub.api import (
+    ArgView,
+    AttributeView,
+    BindingView,
+    CommandView,
+    EndpointView,
+    NodeSummary,
+    NodeView,
+    TargetView,
+)
 
 Next = Callable[[Any], None]
 
@@ -352,6 +361,7 @@ def _binding_arguments(
     fields: tuple[ArgView, ...],
     command: CommandView,
     save: Callable[[dict[str, Any]], None],
+    given: dict[str, str] | None = None,
 ) -> None:
     """Each argument a constant or `$field` of the source event (07-hub.md §3.2). The hub
     copies a field byte for byte and converts nothing, so only a field of the argument's
@@ -365,6 +375,8 @@ def _binding_arguments(
         return [f"${f.name}" for f in fields if f.type == arg.type]
 
     def start(arg: ArgView, first: bool) -> str:
+        if given is not None and arg.name in given:
+            return given[arg.name]  # editing: as the file has it
         same = matching(arg)
         return same[0] if first and len(same) == 1 else _default(arg)
 
@@ -424,42 +436,237 @@ def _save(state: State, source: dict[str, Any], target: dict[str, Any], done: st
     state.worker.submit(task)
 
 
-def remove_binding(state: State, alias: str, endpoint: int) -> None:
-    """Removes the **whole entry** for this source — because in the file one entry has one
-    source."""
+def remove_binding(state: State, binding: BindingView, target: TargetView) -> None:
+    """Removes **the row under the cursor** — this source's event or attribute into this
+    one target — and nothing else.
+
+    It used to remove every entry whose source was the same node and endpoint: all
+    events of a key and every target of each, though the row showed one (2026-10-17).
+    The file has no ids, so the row is found by what the file writes — node, endpoint,
+    event or attribute; node or group, endpoint, command or attribute. A target among
+    several of an entry leaves alone; the entry goes when it has none left. Two equal
+    entries are two rows, and one `-` removes one of them."""
 
     def carry_out(_: Any) -> None:
         def task() -> str:
             view = state.hub.config()
-            live = list((view.document or {}).get("bindings") or [])
-            remain = [
-                w
-                for w in live
-                if not (
-                    str((w.get("from") or {}).get("node")) == alias
-                    and int((w.get("from") or {}).get("endpoint", -1)) == endpoint
-                )
-            ]
-            removed = len(live) - len(remain)
-            if not removed:
+            document = view.document or {}
+            live = list(document.get("bindings") or [])
+            remain = _without(live, binding, target, document.get("groups") or {})
+            if remain is None:
                 return "! I did not find that entry in the file"
             state.hub.config_set("bindings", remain, etag=view.etag)
             state.reload()
-            return f"entries removed: {removed}"
+            return f"removed: {binding.label} → {target.label}"
 
         state.worker.submit(task)
 
     state.overlay = overlay.Confirm(
         title="Remove the binding?",
         lines_before=(
-            "Every entry whose source is this will disappear:",
-            f"  {alias} ep{endpoint}",
+            "This one binding will disappear:",
+            f"  {binding.label}  →  {target.label}",
             "",
             "The file is written at once; the nodes lose nothing.",
         ),
         accept="remove",
         on_accept=carry_out,
     )
+
+
+def _locate(
+    live: list[Any], binding: BindingView, target: TargetView, groups: dict[Any, Any]
+) -> tuple[int, int] | None:
+    """`(entry, target)` indices of the row in the file — `None` when it is not there.
+
+    The file has no ids, so the row is found by what the file writes: node, endpoint,
+    event or attribute; node or group, endpoint, command or attribute. The first match
+    wins, so of two equal entries one is touched."""
+
+    def same_source(source: dict[str, Any]) -> bool:
+        return (
+            str(source.get("node")) == binding.source_alias
+            and int(source.get("endpoint", -1)) == binding.source_endpoint
+            and str(source.get("event", source.get("attribute"))) == binding.source_name
+        )
+
+    def same_group(raw: Any) -> bool:
+        if target.group is None:
+            return False
+        named = (groups.get(target.group) or groups.get(str(target.group)) or {}).get("name")
+        return str(raw) in (str(target.group), str(named))
+
+    def same_target(to: dict[str, Any]) -> bool:
+        where = same_group(to["group"]) if "group" in to else str(to.get("node")) == target.alias
+        return (
+            where
+            and int(to.get("endpoint", 0)) == target.endpoint
+            and str(to.get("command", to.get("attribute"))) == target.name
+        )
+
+    for i, entry in enumerate(live):
+        if not same_source(entry.get("from") or {}):
+            continue
+        for j, to in enumerate(_targets(entry)):
+            if isinstance(to, dict) and same_target(to):
+                return i, j
+    return None
+
+
+def _targets(entry: dict[str, Any]) -> list[Any]:
+    targets = entry.get("to")
+    return list(targets) if isinstance(targets, list) else [targets]
+
+
+def _with_target(live: list[Any], i: int, j: int, to: dict[str, Any] | None) -> list[Any]:
+    """`live` with target `j` of entry `i` replaced by `to` — or removed, for `None`,
+    and the entry with it when it has no target left. An entry written with one `to`
+    keeps that shape."""
+    entry = live[i]
+    items = _targets(entry)
+    rest = [*items[:j], *([to] if to is not None else []), *items[j + 1 :]]
+    if not rest:
+        return [*live[:i], *live[i + 1 :]]
+    shaped = rest if isinstance(entry.get("to"), list) else rest[0]
+    return [*live[:i], {**entry, "to": shaped}, *live[i + 1 :]]
+
+
+def _without(
+    live: list[Any], binding: BindingView, target: TargetView, groups: dict[Any, Any]
+) -> list[Any] | None:
+    """`live` with the one target removed — `None` when it is not there."""
+    found = _locate(live, binding, target, groups)
+    return None if found is None else _with_target(live, *found, None)
+
+
+# --- editing a binding ------------------------------------------------------------
+
+
+def edit_binding(state: State, binding: BindingView, target: TargetView) -> None:
+    """`e` on a row: what the target does, again — the command and its arguments, or the
+    attribute written — with the cursor on what the file has now and the arguments as
+    the file writes them (`$value`, constants). Only this target is replaced. Another
+    source or another target node is `-` and `+`; a group's target is the file's for now,
+    there being no node to ask what it takes."""
+    if target.group is not None:
+        state.say("! a group target is edited in the file — the wizard has no node to ask")
+        return
+
+    def task() -> str:
+        document = state.hub.config().document or {}
+        live = list(document.get("bindings") or [])
+        found = _locate(live, binding, target, document.get("groups") or {})
+        if found is None:
+            return "! I did not find that entry in the file"
+        now = _targets(live[found[0]])[found[1]]
+        source = _endpoint_of(state.hub.node(binding.source_alias), binding.source_endpoint)
+        aim = _endpoint_of(state.hub.node(target.alias), target.endpoint)
+        if source is None or aim is None:
+            return "! the hub does not know these endpoints yet — move the node or press G on it"
+        if binding.on_report:
+            _edit_write(state, binding, target, source, aim, now)
+        else:
+            _edit_command(state, binding, target, source, aim, now)
+        state.dirty = True
+        return ""
+
+    state.worker.submit(task)
+
+
+def _endpoint_of(node: NodeView, number: int) -> EndpointView | None:
+    return next((e for e in node.detail if e.number == number), None)
+
+
+def _edit_command(
+    state: State,
+    binding: BindingView,
+    target: TargetView,
+    source: EndpointView,
+    aim: EndpointView,
+    now: dict[str, Any],
+) -> None:
+    commands = {c.name: c for c in aim.commands if c.available}
+    if not commands:
+        state.say(f"! {target.alias} ep{target.endpoint} takes no command")
+        return
+    subject = f"{binding.label}  →  {target.alias} ep{target.endpoint}"
+    written = dict(now.get("args") or {})
+
+    def save(name: str, args: dict[str, Any]) -> None:
+        to = {k: v for k, v in now.items() if k not in ("command", "args")}
+        to["command"] = name
+        if args:
+            to["args"] = args
+        _replace(state, binding, target, to, f"{binding.label} → {target.alias} {name}")
+
+    def chosen(name: Any) -> None:
+        command = commands[str(name)]
+        if not command.args:
+            save(command.name, {})
+            return
+        same = command.name == target.name
+        _binding_arguments(
+            state,
+            f"{subject} {command.name}",
+            _event_fields(source, binding.source_name),
+            command,
+            lambda args: save(command.name, args),
+            given={k: str(v) for k, v in written.items()} if same else None,
+        )
+
+    options = tuple(commands)
+    state.overlay = overlay.Choose(
+        title="Binding · edit the command",
+        subject=subject,
+        options=options,
+        on_accept=chosen,
+        cursor=options.index(target.name) if target.name in options else 0,
+        note="the arguments come next, as the file has them",
+    )
+
+
+def _edit_write(
+    state: State,
+    binding: BindingView,
+    target: TargetView,
+    source: EndpointView,
+    aim: EndpointView,
+    now: dict[str, Any],
+) -> None:
+    like = next((a for a in source.attributes if a.name == binding.source_name), None)
+    options = _writable(aim, like) if like is not None else ()
+    if not options:
+        state.say(f"! {target.alias} ep{target.endpoint} has no attribute to write it into")
+        return
+
+    def chosen(name: Any) -> None:
+        to = {**now, "attribute": str(name)}
+        _replace(state, binding, target, to, f"{binding.label} → {target.alias} {name}")
+
+    state.overlay = overlay.Choose(
+        title="Binding · edit the attribute",
+        subject=f"{binding.label}  →  {target.alias} ep{target.endpoint}",
+        options=options,
+        on_accept=chosen,
+        cursor=options.index(target.name) if target.name in options else 0,
+    )
+
+
+def _replace(
+    state: State, binding: BindingView, target: TargetView, to: dict[str, Any], done: str
+) -> None:
+    def task() -> str:
+        view = state.hub.config()
+        document = view.document or {}
+        live = list(document.get("bindings") or [])
+        found = _locate(live, binding, target, document.get("groups") or {})
+        if found is None:
+            return "! the entry changed in the file meanwhile — nothing written"
+        state.hub.config_set("bindings", _with_target(live, *found, to), etag=view.etag)
+        state.reload()
+        return f"{done} — saved"
+
+    state.worker.submit(task)
 
 
 # --- shared -----------------------------------------------------------------------
@@ -511,4 +718,4 @@ def _number(text: str) -> Any:
         return text
 
 
-__all__ = ["add_binding", "name_node", "remove_binding", "send_command"]
+__all__ = ["add_binding", "edit_binding", "name_node", "remove_binding", "send_command"]

@@ -432,7 +432,18 @@ def _attribute(state: State) -> tuple[str, int, AttributeView] | None:
 
 
 def _edit(state: State) -> None:
-    """A write to the **file**. It reaches the node by reconciling, not from here."""
+    """A write to the **file**. It reaches the node by reconciling, not from here. In
+    Bindings, the binding under the cursor (`actions.edit_binding`)."""
+    if state.section is Section.BINDINGS:
+        selected = state.selected()
+        if not isinstance(selected, tuple):
+            state.say("! no binding is selected")
+            return
+        if not selected[0].source_alias:
+            state.say("! the source has no alias — it cannot be named in the file")
+            return
+        actions.edit_binding(state, *selected)
+        return
     target = _attribute(state)
     if target is None:
         state.say("! enter an endpoint and choose an attribute")
@@ -645,7 +656,7 @@ def _remove_binding(state: State) -> None:
     if not binding.source_alias:
         state.say("! the source has no alias — it cannot be named in the file")
         return
-    actions.remove_binding(state, binding.source_alias, binding.source_endpoint)
+    actions.remove_binding(state, binding, selected[1])
 
 
 _LETTERS: Final[dict[int, Callable[[State], None]]] = {

@@ -135,6 +135,8 @@ def _spec(source: tuple[object, int, int], origin: SourceRef, target: TargetRef)
     return BindingSpec(
         source=source,  # type: ignore[arg-type]
         source_label=origin.label,
+        source_name=origin.name,
+        target_name=target.name,
         target_uid=target.uid,
         group=target.group,
         target_endpoint=target.endpoint,

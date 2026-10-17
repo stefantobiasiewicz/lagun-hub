@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import curses
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -36,6 +36,7 @@ from lagunhub.api import (
     HealthView,
     JoinView,
     NodeSummary,
+    NodeView,
     TargetView,
     TrafficView,
 )
@@ -781,28 +782,93 @@ class TestBindings:
         app.key(state, ord("+"))
         assert "give one with [N]" in state.status
 
-    def test_removal_is_one_window_and_enter(self, state: State) -> None:
+    CLICK: ClassVar[dict[str, Any]] = {
+        "from": {"node": "hall-switch", "endpoint": 4, "type": "KeyInput", "event": "Click"},
+        "to": {"node": "kitchen-relay", "endpoint": 4, "type": "Output", "command": "Toggle"},
+    }
+    HOLD: ClassVar[dict[str, Any]] = {
+        "from": {"node": "hall-switch", "endpoint": 4, "type": "KeyInput", "event": "HoldStart"},
+        "to": [
+            {"node": "kitchen-relay", "endpoint": 4, "type": "Output", "command": "Off"},
+            {"group": "all-lights", "endpoint": 4, "type": "Output", "command": "Off"},
+        ],
+    }
+
+    def _remove(
+        self, state: State, live: list[Any], event: str, target: TargetView
+    ) -> list[Any] | None:
+        """Press `-` on the row `hall-switch ep4 <event> → target`, confirm, and return
+        what was written to the file — `None` when nothing was."""
         state.section = Section.BINDINGS
-        state.snapshot = replace(
-            state.snapshot,
-            bindings=(
-                BindingView(
-                    source_uid="00" * 8,
-                    source_alias="hall-switch",
-                    source_endpoint=4,
-                    targets=(TargetView(kind="COMMAND", endpoint=4, element=2),),
-                ),
-            ),
+        binding = BindingView(
+            source_uid="00" * 8,
+            source_alias="hall-switch",
+            source_endpoint=4,
+            label=f"hall-switch ep4 {event}",
+            source_name=event,
+            targets=(target,),
         )
-        entry = {"from": {"node": "hall-switch", "endpoint": 4}, "to": {"node": "x"}}
+        state.snapshot = replace(state.snapshot, bindings=(binding,))
         fake = _fake(state)
-        fake.config = lambda: ConfigView(etag="sha256:aaa", document={"bindings": [entry]})  # type: ignore[method-assign]
+        document = {"groups": {1: {"name": "all-lights"}}, "bindings": live}
+        fake.config = lambda: ConfigView(etag="sha256:aaa", document=document)  # type: ignore[method-assign]
         app.key(state, ord("-"))
         assert isinstance(state.overlay, overlay.Confirm)
-        assert any("hall-switch ep4" in line for line in state.overlay.lines())
+        assert any(f"hall-switch ep4 {event}" in line for line in state.overlay.lines())
         app.key(state, 10)
         _run(state)
-        assert ("config_set", ("bindings", [], "sha256:aaa")) in fake.calls
+        writes = [c for c in fake.calls if c[0] == "config_set"]
+        return writes[-1][1][1] if writes else None
+
+    RELAY_TOGGLE = TargetView(
+        kind="COMMAND",
+        endpoint=4,
+        element=2,
+        alias="kitchen-relay",
+        name="Toggle",
+        label="kitchen-relay ep4 Output.Toggle",
+    )
+    RELAY_OFF = TargetView(
+        kind="COMMAND",
+        endpoint=4,
+        element=0,
+        alias="kitchen-relay",
+        name="Off",
+        label="kitchen-relay ep4 Output.Off",
+    )
+    GROUP_OFF = TargetView(
+        kind="GROUP_COMMAND",
+        endpoint=4,
+        element=0,
+        group=1,
+        name="Off",
+        label="group 1 ep4 Output.Off",
+    )
+
+    def test_removal_is_one_window_and_enter(self, state: State) -> None:
+        assert self._remove(state, [self.CLICK], "Click", self.RELAY_TOGGLE) == []
+
+    def test_another_event_of_the_same_key_stays(self, state: State) -> None:
+        """The fault of 2026-10-17: `-` on Click took HoldStart with it."""
+        live = [self.CLICK, self.HOLD]
+        assert self._remove(state, live, "Click", self.RELAY_TOGGLE) == [self.HOLD]
+
+    def test_one_target_of_several_leaves_the_rest(self, state: State) -> None:
+        left = self._remove(state, [self.CLICK, self.HOLD], "HoldStart", self.RELAY_OFF)
+        assert left == [self.CLICK, {**self.HOLD, "to": [self.HOLD["to"][1]]}]
+
+    def test_a_group_target_is_found_by_its_name_in_the_file(self, state: State) -> None:
+        left = self._remove(state, [self.HOLD], "HoldStart", self.GROUP_OFF)
+        assert left == [{**self.HOLD, "to": [self.HOLD["to"][0]]}]
+
+    def test_of_two_equal_entries_one_goes(self, state: State) -> None:
+        assert self._remove(state, [self.CLICK, self.CLICK], "Click", self.RELAY_TOGGLE) == [
+            self.CLICK
+        ]
+
+    def test_nothing_is_written_when_the_row_is_not_in_the_file(self, state: State) -> None:
+        assert self._remove(state, [self.HOLD], "Click", self.RELAY_TOGGLE) is None
+        assert "did not find" in state.status
 
 
 class TestKeys:
@@ -872,11 +938,12 @@ def _fake(state: State) -> FakeHub:
 
 
 def _run(state: State) -> None:
-    """Carry out what the view handed the worker thread — in a test we do it outright."""
+    """Carry out what the view handed the worker thread — in a test we do it outright,
+    and hand the result on as the worker does, so a task's message reaches the status."""
     while not state.worker._queue.empty():
         task = state.worker._queue.get_nowait()
         if task is not None:
-            task()
+            state.worker._on_done(task())
 
 
 def _index(state: State, name: str) -> int:
@@ -1344,3 +1411,89 @@ class TestBindingWithArguments:
 
         state._done(step())
         assert state.status.startswith("! kitchen-strip")
+
+
+class TestEditingABinding:
+    """`e` on a binding row (2026-10-17, DEVICE-03): what the target does, again, from
+    what the file has now — and only this target is replaced."""
+
+    DIAL: ClassVar[dict[str, Any]] = {
+        "from": {"node": "kitchen-dial", "endpoint": 4, "type": "ValueInput", "event": "Changed"},
+        "to": {
+            "node": "kitchen-strip",
+            "endpoint": 4,
+            "type": "Output",
+            "command": "SetLevel",
+            "args": {"level": "$value", "transition": 150},
+        },
+    }
+
+    def _open(self, state: State, live: list[Any]) -> FakeHub:
+        state.section = Section.BINDINGS
+        binding = BindingView(
+            source_uid="50" * 8,
+            source_alias="kitchen-dial",
+            source_endpoint=4,
+            label="kitchen-dial ep4 Changed",
+            source_name="Changed",
+            targets=(
+                TargetView(
+                    kind="COMMAND",
+                    endpoint=4,
+                    element=3,
+                    alias="kitchen-strip",
+                    name="SetLevel",
+                    label="kitchen-strip ep4 Output.SetLevel",
+                ),
+            ),
+        )
+        state.snapshot = replace(state.snapshot, bindings=(binding,))
+        fake = _fake(state)
+        fake.config = lambda: ConfigView(etag="sha256:aaa", document={"bindings": live})  # type: ignore[method-assign]
+        nodes = {
+            "kitchen-dial": NodeView(
+                uid="50" * 8, alias="kitchen-dial", detail=(TestBindingWithArguments.KNOB,)
+            ),
+            "kitchen-strip": NodeView(
+                uid="60" * 8, alias="kitchen-strip", detail=(TestBindingWithArguments.LIGHT,)
+            ),
+        }
+        fake.node = lambda ref: nodes[ref]  # type: ignore[method-assign]
+        app.key(state, ord("e"))
+        _run(state)
+        return fake
+
+    def test_the_arguments_open_as_the_file_has_them(self, state: State) -> None:
+        fake = self._open(state, [self.DIAL])
+        assert isinstance(state.overlay, overlay.Choose)
+        assert state.overlay.options[state.overlay.cursor] == "SetLevel", "on what it is now"
+        app.key(state, 10)
+        assert isinstance(state.overlay, overlay.Form)
+        assert state.overlay.values == {"level": "$value", "transition": "150"}
+        state.overlay.cursor = 1
+        state.overlay.key(overlay.KEY_LEFT)
+        state.overlay.key(overlay.KEY_BACKSPACE)
+        state.overlay.key(ord("2"))  # 150 -> 120: at the cursor, not at the end
+        app.key(state, 10)
+        _run(state)
+        write = next(c for c in fake.calls if c[0] == "config_set")
+        edited = {**self.DIAL["to"], "args": {"level": "$value", "transition": 120}}
+        assert write[1][1] == [{**self.DIAL, "to": edited}]
+
+    def test_another_command_replaces_the_target_and_drops_its_arguments(
+        self, state: State
+    ) -> None:
+        other = {**self.DIAL, "from": {**self.DIAL["from"], "endpoint": 5}}
+        fake = self._open(state, [other, self.DIAL])
+        assert isinstance(state.overlay, overlay.Choose)
+        state.overlay.cursor = list(state.overlay.options).index("On")
+        app.key(state, 10)
+        _run(state)
+        write = next(c for c in fake.calls if c[0] == "config_set")
+        to = {k: v for k, v in self.DIAL["to"].items() if k != "args"} | {"command": "On"}
+        assert write[1][1] == [other, {**self.DIAL, "to": to}], "the other entry untouched"
+
+    def test_a_row_no_longer_in_the_file_says_so(self, state: State) -> None:
+        self._open(state, [])
+        assert state.overlay is None
+        assert "did not find" in state.status

@@ -558,7 +558,7 @@ def context_keys(state: State) -> tuple[tuple[str, str], ...]:
     if state.section is Section.BINDINGS:
         out: list[tuple[str, str]] = [("+", "add a binding")]
         if state.selected() is not None:
-            out.append(("-", "remove the binding"))
+            out += [("e", "edit what the target does"), ("-", "remove the binding")]
         return tuple(out)
     if state.section is Section.JOINING:
         selected = state.selected()

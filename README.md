@@ -317,7 +317,8 @@ i token bierze sam z `config/`, więc zwykle wystarcza `lagun-hub tui`; inaczej
 | `u` w `Buses` | uzgodnij magistralę z `hub.yaml` (`ip link`) — pyta o nazwę, bo magistrala na chwilę znika; sprzęt jest odpytywany tylko, gdy sekcja jest otwarta |
 | `R` | uzgodnij ten węzeł teraz |
 | `G` | read everything from the node in the background — inside an endpoint, only that endpoint; the pane title counts down what is left |
-| `+` `-` | dodaj / usuń powiązanie — zdarzenie → komenda bez argumentów albo raport → zapis atrybutu tego samego typu (FEAT-13) |
+| `+` `-` | dodaj / usuń powiązanie — zdarzenie → komenda (argumenty: stała albo `$pole` zdarzenia) albo raport → zapis atrybutu tego samego typu (FEAT-13); `-` usuwa tylko wiersz pod kursorem |
+| `e` (w Bindings) | edytuj, co robi cel powiązania: komendę i jej argumenty albo zapisywany atrybut, od tego, co jest w pliku |
 | `/` `spacja` `r` `?` | filtr / pauza podglądu / odśwież / pomoc |
 | `q` | **jedyne** wyjście — klawisz nawigacji nigdy nie zamyka widoku |
 

@@ -141,6 +141,8 @@ class TargetView:
     alias: str = ""
     group: int | None = None
     label: str = ""
+    name: str = ""
+    """The command or attribute, as the file names it."""
     active: bool = False
     """Whether the target has an address today. A binding to an addressless node **does
     nothing** — and it is better for that to be visible than to be inferred from it not
@@ -155,6 +157,8 @@ class BindingView:
     source_element: int = 0
     on_report: bool = False
     label: str = ""
+    source_name: str = ""
+    """The event or attribute, as the file names it."""
     targets: tuple[TargetView, ...] = ()
 
 

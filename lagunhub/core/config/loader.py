@@ -559,6 +559,7 @@ def _source(raw: dict[str, Any], by_alias: dict[str, NodeConfig]) -> SourceRef:
             endpoint=endpoint,
             element=element.id,
             label=f"{entry.alias} ep{endpoint} {element.name}",
+            name=element.name,
         )
     if "attribute" not in raw:
         raise ConfigError(
@@ -577,6 +578,7 @@ def _source(raw: dict[str, Any], by_alias: dict[str, NodeConfig]) -> SourceRef:
         element=meta.id,
         on_report=True,
         label=f"{entry.alias} ep{endpoint} {meta.name}",
+        name=meta.name,
     )
 
 
@@ -596,6 +598,7 @@ def _target(
             element=command.id,
             args=_args(command.args, raw, grouped=True),
             label=f"group {number} ep{endpoint} {type_name.name}.{command.name}",
+            name=command.name,
         )
 
     entry = _alias(raw, by_alias)
@@ -609,6 +612,7 @@ def _target(
             endpoint=endpoint,
             element=meta.id,
             label=f"{entry.alias} ep{endpoint} {type_name.name}.{meta.name} ←",
+            name=meta.name,
         )
 
     command = type_name.command(str(raw["command"]))
@@ -619,6 +623,7 @@ def _target(
         element=command.id,
         args=_args(command.args, raw, grouped=False),
         label=f"{entry.alias} ep{endpoint} {type_name.name}.{command.name}",
+        name=command.name,
     )
 
 
