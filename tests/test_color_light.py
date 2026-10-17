@@ -1,5 +1,5 @@
 """An `Output` with `LEVEL | COLOR_RGB` through the hub — the colour light of
-zadania/devices/DEVICE-03.md (`rgb8`, eight WS2812 as one endpoint).
+zadania/zrobione/DEVICE-03.md (`rgb8`, eight WS2812 as one endpoint).
 
 The hub knew the type in full before; what is new is the colour's contract
 (types/0x0020-output.md §5.8): the colour is independent of the level, persistent, white

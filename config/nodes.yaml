@@ -111,7 +111,7 @@ nodes:
     room: kitchen
     endpoints:
       # Eight WS2812 as one colour light (types/0x0020-output.md, LEVEL | COLOR_RGB) —
-      # `lagun-sim rgb8`, the board devices/apps/rgb8 (zadania/devices/DEVICE-03.md).
+      # `lagun-sim rgb8`, the board devices/apps/rgb8 (zadania/zrobione/DEVICE-03.md).
       # kitchen-dial dims it (bindings.yaml); the colour is SetColor's, from the view (`c`).
       4:
         type: Output
