@@ -559,10 +559,15 @@ def edit_binding(state: State, binding: BindingView, target: TargetView) -> None
         if found is None:
             return "! I did not find that entry in the file"
         now = _targets(live[found[0]])[found[1]]
-        source = _endpoint_of(state.hub.node(binding.source_alias), binding.source_endpoint)
-        aim = _endpoint_of(state.hub.node(target.alias), target.endpoint)
+        # `describe`: after a restart the hub has read neither node yet (zadania/BUG-09.md).
+        source = _endpoint_of(
+            state.hub.node(binding.source_alias, describe=True), binding.source_endpoint
+        )
+        aim = _endpoint_of(state.hub.node(target.alias, describe=True), target.endpoint)
         if source is None or aim is None:
-            return "! the hub does not know these endpoints yet — move the node or press G on it"
+            # Both descriptors were read above, so this is a binding to an endpoint the
+            # node does not have — the file and the device disagree.
+            return "! the node has no such endpoint — the binding and the device disagree"
         if binding.on_report:
             _edit_write(state, binding, target, source, aim, now)
         else:
@@ -700,10 +705,12 @@ def _choose_endpoint(
 
 def _fetch(state: State, ref: str, next_step: Callable[[NodeView], None]) -> None:
     """The endpoints have to be fetched — and that is a conversation with the hub, so it
-    goes through the thread."""
+    goes through the thread. With the descriptor read first: a node from the file after
+    a restart has none yet until it speaks, and the wizard said "no endpoint"
+    (zadania/BUG-09.md). A silent node is then `SILENT`, said as such."""
 
     def task() -> str:
-        node = state.hub.node(ref)
+        node = state.hub.node(ref, describe=True)
         next_step(node)
         state.dirty = True
         return ""

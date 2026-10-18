@@ -361,11 +361,18 @@ curl -H "Authorization: Bearer $TOKEN" $API/nodes
 curl -H "Authorization: Bearer $TOKEN" $API/nodes/kitchen-relay/ep/4
 curl -X POST -H "Authorization: Bearer $TOKEN" \
      $API/nodes/kitchen-relay/ep/4/commands/Toggle
+curl -H "Authorization: Bearer $TOKEN" "$API/nodes/kitchen-relay?describe=1"
 curl -N "$API/events?token=$TOKEN"   # zdarzenia na żywo
 ```
 
 Bez tokenu każde żądanie dostaje `401` — **także strumień zdarzeń**. Hub steruje
 rzeczami fizycznymi, więc trybu bez uwierzytelniania po prostu nie ma.
+
+The token as `?token=` works for the streams only (`/events`, `/frames`) — the
+browser's `EventSource` cannot set a header; everything else takes the header, so the
+token does not land in URLs. `?describe=1` on a node reads its descriptor first when
+the hub has not yet — a node from the file right after a restart; a silent node then
+answers `504` (`zadania/BUG-09.md`, `zadania/BUG-10.md`).
 
 Dwa wiersze odpowiedzi warto zobaczyć od razu. Pierwszy: `matches` przy każdym
 atrybucie mówi, czy węzeł ma to, co stoi w pliku — rozjazd między konfiguracją

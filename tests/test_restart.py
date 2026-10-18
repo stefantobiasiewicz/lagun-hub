@@ -172,6 +172,39 @@ class TestAfterRestart:
 
         assert view.started and view.pending > 0
 
+    def test_the_view_reads_what_it_is_when_asked_to(
+        self, clock: Clock, tmp_path: Path, joined: tuple[Hub, int]
+    ) -> None:
+        """The binding wizard straight after a restart: "the dial has no endpoints" until
+        somebody turned it (zadania/BUG-09.md). Asked with `describe`, the view reads the
+        descriptor first, as a command does; asked without, it does not — refreshing the
+        view must never wait on a silent node."""
+        hub = _restart(clock, joined[0], tmp_path / "after")
+        _back(hub, clock, joined[1])
+
+        plain = hub.api.node("kitchen-relay")
+        assert not hub.inst.installation.nodes[RELAY].described
+        assert hub.inst.core.enumeration.started == 0, "a plain view reads nothing"
+
+        described = hub.api.node("kitchen-relay", describe=True)
+
+        assert 4 not in {ep.number for ep in plain.detail if ep.type_id is not None}
+        assert any(ep.number == 4 and ep.type_name == "Output" for ep in described.detail)
+        assert hub.inst.installation.nodes[RELAY].described
+
+    def test_asked_to_read_a_silent_one_says_so(
+        self, clock: Clock, tmp_path: Path, joined: tuple[Hub, int]
+    ) -> None:
+        """Silence, said as silence — not "no endpoint that reports anything"."""
+        hub = _restart(clock, joined[0], tmp_path / "after")
+        relay = _back(hub, clock, joined[1])
+        relay.faults.silent_until = clock.now + 60.0
+
+        with pytest.raises(ApiError) as error:
+            hub.api.node("kitchen-relay", describe=True)
+
+        assert error.value.problem is Problem.SILENT
+
     def test_its_first_frame_reads_what_it_is(
         self, clock: Clock, tmp_path: Path, joined: tuple[Hub, int]
     ) -> None:

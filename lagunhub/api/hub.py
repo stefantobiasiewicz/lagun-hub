@@ -228,8 +228,18 @@ class HubApi:
         included."""
         return self._ask(self._nodes)
 
-    def node(self, ref: str) -> NodeView:
-        return self._ask(lambda inst: self._node(inst, self._find(inst, ref)))
+    def node(self, ref: str, *, describe: bool = False) -> NodeView:
+        """One node. `describe` reads its descriptor first when the hub has not yet —
+        a node from the file after a restart (zadania/BUG-09.md); what needs its
+        endpoints asks for it, a refresh of the view does not, so a silent node cannot
+        hold the view up."""
+
+        def build(inst: Installation) -> NodeView:
+            return self._node(inst, self._find(inst, ref))
+
+        if describe:
+            return self._ask_described(ref, build)
+        return self._ask(build)
 
     def endpoint(self, ref: str, number: int) -> EndpointView:
         def build(inst: Installation) -> EndpointView:

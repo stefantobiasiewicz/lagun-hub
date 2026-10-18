@@ -160,7 +160,7 @@ class BusWatch(threading.Thread):
         self._lock = threading.RLock()
         """Held for a whole look, repairs included — so `planned()` waits for a repair
         in progress instead of running ``ip link`` alongside it."""
-        self._stop = threading.Event()
+        self._halt = threading.Event()
 
     # --- set-up ---
 
@@ -216,11 +216,11 @@ class BusWatch(threading.Thread):
     # --- the thread ---
 
     def run(self) -> None:
-        while not self._stop.wait(TICK):
+        while not self._halt.wait(TICK):
             self.tick()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
 
     def tick(self, now: float | None = None) -> None:
         """One look at every bus. Tests call this instead of start()."""

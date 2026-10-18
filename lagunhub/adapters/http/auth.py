@@ -62,7 +62,10 @@ def matches(expected: str, given: str | None) -> bool:
     """A constant-time comparison. `None` — that is, a missing header — never passes."""
     if not given:
         return False
-    return hmac.compare_digest(expected, given)
+    # `compare_digest` takes `str` in ASCII only and raises `TypeError` otherwise — so a
+    # header with `é` dropped the connection instead of getting 401 (zadania/BUG-10.md).
+    # As UTF-8 bytes any text compares, still in constant time.
+    return hmac.compare_digest(expected.encode("utf-8"), given.encode("utf-8"))
 
 
 def _write(file_: Path, token: str) -> None:

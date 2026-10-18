@@ -697,6 +697,17 @@ class TestQuestionChain:
             },
         }
 
+    def test_the_wizard_reads_what_each_node_is(self, state: State) -> None:
+        """The source and the target alike — after a restart the hub has not read them
+        yet, and the wizard used to say "no endpoint" (zadania/BUG-09.md)."""
+        state.section = Section.BINDINGS
+        app.key(state, ord("+"))
+        assert isinstance(state.overlay, overlay.Choose)
+        state.overlay.cursor = list(state.overlay.options).index("hall-switch")
+        app.key(state, 10)
+        _run(state)
+        assert ("node", ("hall-switch", True)) in _fake(state).calls
+
     def test_the_wizard_binds_a_report_to_a_write(self, state: State) -> None:
         """A reported attribute as the source, a writable one of the same type as the
         target — the binding that carries a sensor's value to a display field
@@ -1458,7 +1469,12 @@ class TestEditingABinding:
                 uid="60" * 8, alias="kitchen-strip", detail=(TestBindingWithArguments.LIGHT,)
             ),
         }
-        fake.node = lambda ref: nodes[ref]  # type: ignore[method-assign]
+
+        def node(ref: str, *, describe: bool = False) -> NodeView:
+            fake.calls.append(("node", (ref, describe)))
+            return nodes[ref]
+
+        fake.node = node  # type: ignore[method-assign]
         app.key(state, ord("e"))
         _run(state)
         return fake
@@ -1479,6 +1495,13 @@ class TestEditingABinding:
         write = next(c for c in fake.calls if c[0] == "config_set")
         edited = {**self.DIAL["to"], "args": {"level": "$value", "transition": 120}}
         assert write[1][1] == [{**self.DIAL, "to": edited}]
+
+    def test_editing_reads_what_both_nodes_are(self, state: State) -> None:
+        """After a restart the hub has not read either node yet (zadania/BUG-09.md)."""
+        fake = self._open(state, [self.DIAL])
+        asked = [c[1] for c in fake.calls if c[0] == "node"]
+        assert ("kitchen-dial", True) in asked
+        assert ("kitchen-strip", True) in asked
 
     def test_another_command_replaces_the_target_and_drops_its_arguments(
         self, state: State

@@ -173,7 +173,7 @@ class CoreThread(threading.Thread):
         node that keeps talking and does not answer would start a read on every frame."""
         self._reports: dict[Source, tuple[Target, ...]] = {}
         self._issues_seen = 0
-        self._stop = threading.Event()
+        self._halt = threading.Event()
         if config_store is not None:
             self.schedule.after(clock(), WATCH, self._watch_config)
 
@@ -203,7 +203,7 @@ class CoreThread(threading.Thread):
     # --- the loop ------------------------------------------------------------
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._halt.is_set():
             now = self.clock()
             wait = min(self.schedule.next_deadline(now), 0.2)
             try:
@@ -231,7 +231,7 @@ class CoreThread(threading.Thread):
         return handled
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
 
     # --- snapshot ------------------------------------------------------------
 

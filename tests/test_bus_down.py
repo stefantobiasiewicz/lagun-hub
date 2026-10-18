@@ -15,12 +15,16 @@ from __future__ import annotations
 
 import errno
 import queue
+import threading
 import time
 
 import pytest
 
 from lagunhub.api import ApiError, HubApi
+from lagunhub.buswatch import BusWatch
 from lagunhub.cli import _dead_threads
+from lagunhub.core.hub import CoreThread
+from lagunhub.core.rx import RxThread
 from lagunhub.core.transactions import Outcome
 from lagunhub.protocol.bus import Bus, VirtualNetwork
 from lagunhub.protocol.endpoints import output as out
@@ -263,3 +267,63 @@ def test_a_dead_rx_thread_lands_in_the_issues(tmp_path) -> None:  # type: ignore
 
     assert lines == ["the hub's RX thread has stopped — restart the hub"]
     assert inst.core.installation.issues[-1] == lines[0]
+
+
+def test_a_frame_the_bus_cannot_decode_does_not_end_reception(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A `ValueError` from `recv` is the bus's fault, counted against it like `OSError`
+    (zadania/BUG-10.md, R2) — and only around `recv`: the binding engine's own errors
+    still surface."""
+    inst, hub = rig(tmp_path)
+    real = hub.recv
+    broken = [True]
+
+    def recv() -> Frame | None:
+        if broken[0]:
+            broken[0] = False
+            raise ValueError("identifier does not fit into 29 bits: 0x40000123")
+        return real()
+
+    hub.recv = recv  # type: ignore[method-assign]
+    inst.rx.pump()
+    assert inst.rx.errors == [1]
+
+    inst.click()
+    assert inst.output.values[out.ON_OFF] is True, "the next frame still reaches the binding"
+
+
+# Thread internals across the versions `requires-python` allows. 3.12 calls
+# `self._stop()` from `join()` and `is_alive()`; 3.13 does not have it any more, so
+# `dir(threading.Thread)` alone would not catch it here.
+_THREAD_INTERNALS = frozenset(dir(threading.Thread)) | {
+    "_stop",
+    "_started",
+    "_is_stopped",
+    "_tstate_lock",
+    "_handle",
+    "_target",
+    "_name",
+    "_args",
+    "_kwargs",
+    "_daemonic",
+    "_ident",
+    "_native_id",
+}
+
+
+@pytest.mark.parametrize("cls", [RxThread, CoreThread, BusWatch])
+def test_no_hub_thread_shadows_what_threading_uses(cls: type[threading.Thread]) -> None:
+    """`self._stop = Event()` turned `join()` and `is_alive()` into `TypeError` on 3.12 —
+    the very calls that report a dead thread (zadania/BUG-10.md, R3)."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(cls))
+    assigned = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Store)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    }
+    assert not assigned & _THREAD_INTERNALS

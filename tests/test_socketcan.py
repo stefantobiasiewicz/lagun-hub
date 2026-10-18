@@ -10,6 +10,7 @@ from lagunhub.protocol.bus.socketcan import (
     FRAME_STRUCT,
     HAS_SOCKETCAN,
     SocketCanBus,
+    unpack,
 )
 from lagunhub.protocol.frame import Frame, encode_id
 
@@ -46,3 +47,37 @@ def test_an_empty_payload_survives_padding() -> None:
 def test_without_socketcan_it_says_outright_what_to_do() -> None:
     with pytest.raises(RuntimeError, match="VirtualBus"):
         SocketCanBus("can0")
+
+
+# --- frames that are not LagunBus's (zadania/BUG-10.md) -------------------------
+
+CAN_RTR_FLAG = 0x4000_0000
+CAN_ERR_FLAG = 0x2000_0000
+
+
+def _kernel(can_id: int, data: bytes = b"") -> bytes:
+    return FRAME_STRUCT.pack(can_id, len(data), data.ljust(8, b"\x00"))
+
+
+def test_an_extended_frame_is_ours() -> None:
+    f = Frame(encode_id(0x1, 0x02A, 4, 0x03), b"\x11\x01")
+    assert unpack(_kernel(f.can_id | CAN_EFF_FLAG, f.data)) == f
+
+
+@pytest.mark.parametrize(
+    ("can_id", "what"),
+    [
+        (CAN_EFF_FLAG | CAN_RTR_FLAG | 0x123, "a remote request"),
+        (CAN_EFF_FLAG | CAN_ERR_FLAG | 0x004, "an error frame"),
+        (0x123, "a standard 11-bit identifier"),
+    ],
+)
+def test_a_frame_lagunbus_does_not_use_is_skipped(can_id: int, what: str) -> None:
+    """One RTR frame from an analyser used to end the RX thread: its flag stayed in the
+    identifier and `Frame` refused 30 bits. A standard frame was worse — read quietly as
+    a LagunBus identifier."""
+    assert unpack(_kernel(can_id)) is None, what
+
+
+def test_a_short_read_is_skipped() -> None:
+    assert unpack(b"\x00" * 8) is None

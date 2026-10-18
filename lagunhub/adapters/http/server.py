@@ -50,6 +50,12 @@ things."""
 
 MAX_BODY: Final = 64 * 1024
 
+TIMEOUT: Final = 30.0
+"""How long a connection may stay silent — reading a request or writing a response —
+before its thread is let go. Without it a client that opens a connection and says
+nothing holds a thread for good, token or no token (zadania/BUG-10.md, R8). An SSE stream
+is not touched: it writes a heartbeat every `HEARTBEAT` seconds."""
+
 _STREAMS: Final[dict[str, Callable[[HubApi], AbstractContextManager[Stream[Any, Any]]]]] = {
     "/events": lambda api: api.stream(),
     "/frames": lambda api: api.frames(),
@@ -115,6 +121,27 @@ class Request:
             raise ApiError(Problem.INVALID, "the request body is to be a JSON object")
         return self.body.get(name, default)
 
+    def flag(self, name: str) -> bool:
+        """A JSON `true`/`false` and nothing else: `bool("false")` is `True`, and that
+        was a forced removal (zadania/BUG-10.md, R5)."""
+        value = self.field(name, False)
+        if not isinstance(value, bool):
+            raise ApiError(Problem.INVALID, f"{name} is to be true or false, not {value!r}")
+        return value
+
+    def switch(self, name: str) -> bool:
+        """A query switch: `1` or `0`, absent is `0`."""
+        value = self.query.get(name, "0")
+        if value not in ("0", "1"):
+            raise ApiError(Problem.INVALID, f"{name} is to be 1 or 0, not {value!r}")
+        return value == "1"
+
+    def seconds(self, name: str, default: float) -> float:
+        value = self.field(name, default)
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ApiError(Problem.INVALID, f"{name} is to be a number, not {value!r}")
+        return float(value)
+
 
 @dataclass(frozen=True, slots=True)
 class Response:
@@ -171,7 +198,11 @@ def routes(api: HubApi) -> list[Route]:
     return [
         ("GET", re.compile(r"^/$"), info),
         ("GET", re.compile(r"^/nodes$"), lambda r: Response(body=api.nodes())),
-        ("GET", re.compile(r"^/nodes/([^/]+)$"), lambda r: Response(body=api.node(r.args[0]))),
+        (
+            "GET",
+            re.compile(r"^/nodes/([^/]+)$"),
+            lambda r: Response(body=api.node(r.args[0], describe=r.switch("describe"))),
+        ),
         (
             "GET",
             re.compile(r"^/nodes/([^/]+)/ep/(\d+)$"),
@@ -197,12 +228,12 @@ def routes(api: HubApi) -> list[Route]:
         (
             "POST",
             re.compile(r"^/nodes/([^/]+)/identify$"),
-            lambda r: Response(body=api.identify(r.args[0], int(r.field("seconds", 5)))),
+            lambda r: Response(body=api.identify(r.args[0], int(r.seconds("seconds", 5)))),
         ),
         (
             "POST",
             re.compile(r"^/nodes/([^/]+)/remove$"),
-            lambda r: Response(body=api.remove(r.args[0], force=bool(r.field("force", False)))),
+            lambda r: Response(body=api.remove(r.args[0], force=r.flag("force"))),
         ),
         (
             "POST",
@@ -260,7 +291,7 @@ def routes(api: HubApi) -> list[Route]:
         (
             "POST",
             re.compile(r"^/commissioning/accept$"),
-            lambda r: Response(body=api.accept_new(float(r.field("seconds", 900)))),
+            lambda r: Response(body=api.accept_new(r.seconds("seconds", 900))),
         ),
         (
             "POST",
@@ -298,7 +329,9 @@ class HubServer:
         """Clients that left without saying goodbye. Normal, but worth knowing how many."""
 
         self.errors = 0
+        """Requests the hub failed on — a bug, answered with 500."""
 
+        self.timeout = TIMEOUT
         handler = _make_handler(self)
         self._http = _Listener((host, port), handler, self)
         self._http.daemon_threads = True
@@ -362,6 +395,7 @@ def _make_handler(server: HubServer) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = f"lagun-hub/{__version__}"
+        timeout = server.timeout
 
         def do_GET(self) -> None:
             self._handle("GET")
@@ -386,12 +420,16 @@ def _make_handler(server: HubServer) -> type[BaseHTTPRequestHandler]:
             path = unquote(breakdown.path)
             query = {k: v[0] for k, v in parse_qs(breakdown.query).items()}
 
-            if not self._authorised(query):
+            stream = method == "GET" and path in _STREAMS
+            if not self._authorised(query, stream=stream):
                 server.rejected += 1
+                # The body, if any, is not read — left there it would be read as the
+                # next request on this connection (zadania/BUG-10.md, R6).
+                self.close_connection = True
                 self._send(HTTPStatus.UNAUTHORIZED, {"problem": "unauthorized"})
                 return
 
-            if method == "GET" and path in _STREAMS:
+            if stream:
                 self._stream(path)
                 return
 
@@ -399,25 +437,55 @@ def _make_handler(server: HubServer) -> type[BaseHTTPRequestHandler]:
                 body = self._body()
                 response = self._route(method, path, query, body)
             except ApiError as exc:
+                self._problem(exc)
+                return
+            except (ValueError, TypeError) as exc:
+                # What a route makes of what the client sent: the client's to correct.
+                self._problem(ApiError(Problem.INVALID, str(exc)))
+                return
+            except Exception as exc:
+                # A bug in the hub. Answered, so the client is not left with a dropped
+                # connection and nothing to say, and counted; the server goes on.
+                server.errors += 1
+                print(f"!! request handling error: {exc!r}", flush=True)
                 self._send(
-                    STATUS.get(exc.problem, HTTPStatus.INTERNAL_SERVER_ERROR),
-                    {"problem": exc.problem.value, "message": exc.message, "result": exc.result},
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    {"problem": "internal", "message": f"the hub failed on this request: {exc}"},
                 )
                 return
             self._send(response.status, response.body, etag=response.etag)
 
-        def _authorised(self, query: Mapping[str, str]) -> bool:
-            """A header or a query parameter. The parameter is needed because the browser’s
-            `EventSource` cannot set a header — and for that reason only."""
+        def _problem(self, exc: ApiError) -> None:
+            self._send(
+                STATUS.get(exc.problem, HTTPStatus.INTERNAL_SERVER_ERROR),
+                {"problem": exc.problem.value, "message": exc.message, "result": exc.result},
+            )
+
+        def _authorised(self, query: Mapping[str, str], *, stream: bool) -> bool:
+            """A header, or — for a stream only — a query parameter. The parameter is
+            needed because the browser’s `EventSource` cannot set a header, and for that
+            reason only: a token in a URL lands in history and logs, so it opens nothing
+            else (zadania/BUG-10.md, R7)."""
             header = self.headers.get("Authorization", "")
-            given = header[7:] if header.startswith("Bearer ") else query.get("token")
+            if header.startswith("Bearer "):
+                given: str | None = header[7:]
+            else:
+                given = query.get("token") if stream else None
             return auth.matches(server.token, given)
 
         def _body(self) -> Any:
-            length = int(self.headers.get("Content-Length") or 0)
+            declared = self.headers.get("Content-Length") or "0"
+            try:
+                length = int(declared)
+            except ValueError:
+                self.close_connection = True  # where this body ends is anybody's guess
+                raise ApiError(
+                    Problem.INVALID, f"Content-Length {declared!r} is not a number"
+                ) from None
             if length <= 0:
                 return None
             if length > MAX_BODY:
+                self.close_connection = True  # the body stays unread
                 raise ApiError(Problem.INVALID, f"request body larger than {MAX_BODY} B")
             raw_bytes = self.rfile.read(length)
             try:
@@ -532,6 +600,8 @@ def _make_handler(server: HubServer) -> type[BaseHTTPRequestHandler]:
             if etag:
                 self.send_header("ETag", f'"{etag}"')
             self.send_header("Content-Length", str(len(raw_bytes)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.end_headers()
             if raw_bytes:
                 self.wfile.write(raw_bytes)

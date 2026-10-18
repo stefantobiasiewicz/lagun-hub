@@ -211,11 +211,29 @@ class TestAuthentication:
     def test_a_bad_token_does_not_get_through(self, hub: Hub) -> None:
         assert hub.get("/nodes", token="almost-right")[0] == 401
 
-    def test_a_token_in_a_query_parameter_works_for_sse(self, hub: Hub) -> None:
+    def test_a_token_in_a_query_parameter_works_only_for_streams(self, hub: Hub) -> None:
         """The browser's `EventSource` cannot set a header — and that is the only
-        reason."""
+        reason, so a query token opens nothing else: in a URL it lands in history and
+        logs (zadania/BUG-10.md, R7). The stream itself is `test_the_stream_needs_no_header`."""
         status, _ = hub.get(f"/nodes?token={TOKEN}", token=None)
-        assert status == 200
+        assert status == 401
+
+    def test_a_token_outside_ascii_is_refused_not_a_crash(self, hub: Hub) -> None:
+        """`compare_digest` on `str` raises `TypeError` beyond ASCII — the client used to
+        get a dropped connection instead of 401."""
+        assert hub.get("/nodes", token="caf\u00e9")[0] == 401
+
+    def test_refusing_closes_a_connection_whose_body_was_not_read(self, hub: Hub) -> None:
+        """The unread body would be read as the next request on the same connection."""
+        connection = http.client.HTTPConnection(*hub.server.address, timeout=5)
+        try:
+            connection.request("POST", "/nodes/kitchen-relay/enumerate", body=b"{}")
+            response = connection.getresponse()
+            response.read()
+            assert response.status == 401
+            assert response.getheader("Connection") == "close"
+        finally:
+            connection.close()
 
     def test_the_token_does_not_leak_in_a_response(self, hub: Hub) -> None:
         _, info = hub.get("/")
@@ -514,6 +532,67 @@ class TestStream:
         hub.until(lambda: hub.server.streams == 0, "the stream did not close")
         assert hub.server.errors == 0
         assert hub.get("/nodes")[0] == 200, "the server lives on"
+
+
+class TestDescribe:
+    """`?describe=1` — the view of a node with its descriptor read first
+    (zadania/BUG-09.md); the restart case itself is in `test_restart.py`."""
+
+    def test_asked_to_describe(self, hub: Hub) -> None:
+        status, view = hub.get("/nodes/kitchen-relay?describe=1")
+        assert status == 200
+        assert any(ep["number"] == 4 for ep in view["detail"])
+
+    def test_describe_is_one_or_zero(self, hub: Hub) -> None:
+        assert hub.get("/nodes/kitchen-relay?describe=maybe")[0] == 400
+
+
+class TestBadRequests:
+    """A request the hub cannot take is an answer, not a dropped connection
+    (zadania/BUG-10.md, R4–R6)."""
+
+    def test_a_number_that_is_not_one(self, hub: Hub) -> None:
+        status, body = hub.call("POST", "/nodes/kitchen-relay/identify", {"seconds": "abc"})
+        assert status == 400
+        assert body["problem"] == "invalid"
+
+    def test_accepting_for_a_time_that_is_not_one(self, hub: Hub) -> None:
+        assert hub.call("POST", "/commissioning/accept", {"seconds": "soon"})[0] == 400
+
+    def test_force_as_a_string_is_not_true(self, hub: Hub) -> None:
+        """`bool("false")` is `True` — that was a forced removal."""
+        status, _ = hub.call("POST", "/nodes/kitchen-relay/remove", {"force": "false"})
+        assert status == 400
+        assert hub.get("/nodes/kitchen-relay")[0] == 200, "nothing was removed"
+
+    def test_a_length_that_is_not_a_number(self, hub: Hub) -> None:
+        connection = http.client.HTTPConnection(*hub.server.address, timeout=5)
+        try:
+            connection.putrequest("POST", "/nodes/kitchen-relay/identify")
+            connection.putheader("Authorization", f"Bearer {TOKEN}")
+            connection.putheader("Content-Length", "many")
+            connection.endheaders()
+            response = connection.getresponse()
+            assert response.status == 400
+            assert json.loads(response.read())["problem"] == "invalid"
+        finally:
+            connection.close()
+
+    def test_a_hub_fault_is_500_with_a_body(
+        self, hub: Hub, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def broken() -> None:
+            raise RuntimeError("a bug in the hub")
+
+        monkeypatch.setattr(hub.server.api, "info", broken)
+        status, body = hub.get("/")
+        assert status == 500
+        assert body["problem"] == "internal"
+        assert hub.server.errors == 1
+        assert hub.get("/nodes")[0] == 200, "the server lives on"
+
+    def test_a_silent_client_does_not_hold_a_thread_forever(self, hub: Hub) -> None:
+        assert hub.server.timeout == 30.0
 
 
 # --- helpers ---------------------------------------------------------------------

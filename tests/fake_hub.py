@@ -196,8 +196,8 @@ class FakeHub:
             NodeSummary(uid=SWITCH, alias="hall-switch", configured=True),
         )
 
-    def node(self, ref: str) -> NodeView:
-        self._record("node", ref)
+    def node(self, ref: str, *, describe: bool = False) -> NodeView:
+        self._record("node", ref, describe)
         if ref in self.removed:
             raise ApiError(Problem.NOT_FOUND, f"there is no node {ref!r}")
         if ref in ("hall-switch", SWITCH):

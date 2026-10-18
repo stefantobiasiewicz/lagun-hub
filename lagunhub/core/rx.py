@@ -15,6 +15,10 @@ the view looking normal. Now it is counted against that bus and the other buses 
 after ``up`` the same socket receives again, since CAN_RAW is bound to the interface's
 index and not to its state. Only ``OSError`` is caught: a bug in the binding engine is
 to surface, not be swallowed.
+
+A ``ValueError`` from ``recv`` — a frame the bus could not decode — is counted the same
+way (zadania/BUG-10.md, R2). Before, one RTR frame on SocketCAN ended the thread; the
+bus now skips such frames itself, and this is what holds for a bus that does not.
 """
 
 from __future__ import annotations
@@ -96,7 +100,7 @@ class RxThread(threading.Thread):
         self.overflowed = 0
         self.errors = [0] * len(self.buses)
         """Failed receptions per bus — the interface went down or away."""
-        self._stop = threading.Event()
+        self._halt = threading.Event()
 
     def pump(self) -> int:
         """Handle everything waiting and return. Tests call this instead of start().
@@ -110,13 +114,17 @@ class RxThread(threading.Thread):
         """Everything waiting on one bus. Its error ends the draining, not the thread."""
         bus = self.buses[index]
         handled = 0
-        try:
-            while (frame := bus.recv()) is not None:
-                self._dispatch(index, frame)
-                handled += 1
-        except OSError:
-            self.errors[index] += 1
-        return handled
+        while True:
+            try:
+                frame = bus.recv()
+            except (OSError, ValueError):
+                # Around `recv` only: the engine's own `ValueError` is a bug, not the bus's.
+                self.errors[index] += 1
+                return handled
+            if frame is None:
+                return handled
+            self._dispatch(index, frame)
+            handled += 1
 
     def _dispatch(self, index: int, frame: Frame) -> None:
         self.received += 1
@@ -135,7 +143,7 @@ class RxThread(threading.Thread):
         selector = selectors.DefaultSelector()
         registered: dict[int, int] = {}
         try:
-            while not self._stop.is_set():
+            while not self._halt.is_set():
                 self._register(selector, registered)
                 for key, _ in selector.select(timeout=0.2):
                     self._drain(key.data)
@@ -164,4 +172,4 @@ class RxThread(threading.Thread):
             registered[index] = fd
 
     def stop(self) -> None:
-        self._stop.set()
+        self._halt.set()
