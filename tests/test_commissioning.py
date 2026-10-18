@@ -173,6 +173,74 @@ class TestJoiningMode:
         assert inst.records[0xAABBCCDD].state == NodeState.BLOCKED
 
 
+class TestOneChosen:
+    """One pending node without an address, admitted by the operator while the mode is
+    off (06-cykl-zycia-urzadzenia.md §2.1; zadania/zrobione/FEAT-15.md)."""
+
+    def test_it_gets_an_address_at_its_next_announcement(self, clock: Clock) -> None:
+        comm, inst, sender, _ = joining(clock)
+        comm.on_join(0, announcement(0xAABBCCDD))
+        comm.admit(0xAABBCCDD)
+
+        assert sender.assignments() == [], "no ASSIGNMENT without an announcement (N2)"
+        comm.on_join(0, announcement(0xAABBCCDD))
+
+        assert sender.assignments() == [(0xAABBCCDD, 0x001)]
+        assert inst.records[0xAABBCCDD].state == NodeState.JOINED
+        assert not comm.admitting(0xAABBCCDD), "the choice is spent"
+
+    def test_the_others_stay_pending(self, clock: Clock) -> None:
+        comm, inst, sender, _ = joining(clock)
+        comm.on_join(0, announcement(0xAABBCCDD))
+        comm.on_join(0, announcement(0x11223344))
+        comm.admit(0xAABBCCDD)
+
+        comm.on_join(0, announcement(0x11223344))
+        comm.on_join(0, announcement(0xAABBCCDD))
+
+        assert sender.assignments() == [(0xAABBCCDD, 0x001)]
+        assert inst.records[0x11223344].state == NodeState.PENDING
+
+    def test_the_choice_expires_like_the_mode(self, clock: Clock) -> None:
+        comm, inst, sender, _ = joining(clock)
+        comm.on_join(0, announcement(0xAABBCCDD))
+        comm.admit(0xAABBCCDD)
+
+        clock.advance(ACCEPT_WINDOW + 1.0)
+        comm.on_join(0, announcement(0xAABBCCDD))
+
+        assert sender.assignments() == []
+        assert inst.records[0xAABBCCDD].state == NodeState.PENDING
+
+    def test_a_full_block_keeps_the_choice_for_the_next_announcement(self, clock: Clock) -> None:
+        comm, inst, sender, _ = joining(clock)
+        comm.on_join(0, announcement(0xAABBCCDD))
+        comm.admit(0xAABBCCDD)
+        lo, hi = NODE_CLASS_BLOCKS[NodeClass.CONTROL]
+        for address in range(lo, hi + 1):
+            inst.addresses.reserve(address)
+
+        comm.on_join(0, announcement(0xAABBCCDD))
+        assert sender.assignments() == []
+        assert comm.admitting(0xAABBCCDD)
+
+        inst.addresses.release(lo)
+        comm.on_join(0, announcement(0xAABBCCDD))
+        assert sender.assignments() == [(0xAABBCCDD, lo)]
+
+    def test_a_blocked_one_gets_nothing_even_when_chosen(self, clock: Clock) -> None:
+        comm, inst, sender, _ = joining(clock)
+        comm.on_join(0, announcement(0xAABBCCDD))
+        inst.record(0xAABBCCDD).uid = Uid(b"\x01" * 8)
+        inst.blocked = frozenset({Uid(b"\x01" * 8)})
+        comm.admit(0xAABBCCDD)
+
+        comm.on_join(0, announcement(0xAABBCCDD))
+
+        assert sender.assignments() == []
+        assert inst.records[0xAABBCCDD].state == NodeState.BLOCKED
+
+
 class TestAnnouncement:
     def test_the_block_follows_from_the_declared_class(self, clock: Clock) -> None:
         """The completion criterion: CONTROL gets an address from 0x001–0x0FF."""

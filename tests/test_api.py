@@ -109,6 +109,30 @@ def relay(hub: Hub, clock: Clock) -> NodeCore:
     return hub.join(relay1(uid=RELAY_UID, address=0, clock=clock, name="relay"))
 
 
+class TestAdmittingOneWaiting:
+    """`admit` on a pending node without an address: in at its next announcement, the
+    mode closed throughout (zadania/zrobione/FEAT-15.md)."""
+
+    def test_it_gets_in_and_is_enumerated(self, hub: Hub, clock: Clock) -> None:
+        node = hub.inst.add(relay1(uid=RELAY_UID, address=0, clock=clock, name="relay"))
+        hub.inst.run(3.0, step=0.05)
+        waiting = next(j for j in hub.api.commissioning().known if j.state == "PENDING")
+        assert node.address == 0, "the mode is closed — nothing gets in by itself"
+
+        view = hub.api.admit(waiting.short_id)
+
+        assert next(j for j in view.known if j.short_id == waiting.short_id).admitting
+        assert view.accepting is False, "the mode itself stays closed"
+        hub.inst.run(5.0, step=0.05)
+        assert node.address != 0
+        assert hub.api.node("kitchen-relay").state == "READY"
+
+    def test_one_never_seen_is_not_found(self, hub: Hub) -> None:
+        with pytest.raises(ApiError) as error:
+            hub.api.admit(0xAABBCCDD)
+        assert error.value.problem is Problem.NOT_FOUND
+
+
 class TestReading:
     def test_the_list_includes_nodes_not_yet_present(self, hub: Hub) -> None:
         """A configured but unjoined node **has to** be visible — otherwise a typo in a

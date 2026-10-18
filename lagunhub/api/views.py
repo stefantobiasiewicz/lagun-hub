@@ -171,6 +171,9 @@ class JoinView:
     state: str = "UNKNOWN"
     uid: str | None = None
     last_seen: float | None = None
+    admitting: bool = False
+    """A pending node without an address the operator admitted: it gets one at its next
+    announcement (zadania/zrobione/FEAT-15.md)."""
 
 
 @dataclass(frozen=True, slots=True)

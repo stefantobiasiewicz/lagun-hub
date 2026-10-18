@@ -543,7 +543,8 @@ ZGŁOSZENIE (K=1, ShortId w ID)
    │ Uid zablokowany w pliku?  → nic, BLOCKED   │  także przy włączonym trybie (§8.4)
    │ ShortId znany?                             │
    │   TAK  → adres, który ten węzeł miał       │  zawsze, bez pytania o tryb
-   │   NIE  → tryb przyjmowania włączony?       │
+   │   NIE  → tryb włączony albo ten ShortId    │
+   │          wskazany przez operatora?         │  wskazanie: `admit`, 15 min
    │            TAK → pierwszy wolny z BLOKU    │  blok wg NodeClass
    │            NIE → zapisz jako PENDING       │  nie przydzielaj
    └────────────────────────────────────────────┘
@@ -557,6 +558,13 @@ Asymetria z [`06`](../lagunbus-spec/06-cykl-zycia-urzadzenia.md) §2.1 jest tuta
 **znane urządzenie dostaje swój adres zawsze**, bo wymiana bezpiecznika nie ma wymagać
 ceremonii. Tryb chroni wyłącznie przed wejściem urządzenia nieznanego i wygasa sam po
 piętnastu minutach.
+
+One pending node without an address can also be let in **alone**: `admit` (`y` in the
+view) chooses its `ShortId`, and the hub gives it an address at its next announcement —
+not at once, because a node waits for an ASSIGNMENT only a moment after announcing
+(`lagunbus-spec/DECYZJE.md`, "Przyjęcie jednego wskazanego węzła"). The mode stays
+closed, so every other pending node stays pending; the choice expires like the mode
+(`zadania/zrobione/FEAT-15.md`).
 
 The address pool keeps three blocks (`CONTROL` `0x001`–`0x0FF`, `SENSOR` `0x100`–`0x3FF`,
 reserve `0x400`–`0x7FD`). An address a removed node may still speak from is protected by
@@ -1081,7 +1089,7 @@ GET  /bindings                               powiązania z pliku, z rozwiązanym
 GET  /issues                                 rozjazdy konfiguracji, konflikty adresów
 GET  /health                                 histogram opóźnień, liczniki, ruch per magistrala (§11.1)
 POST /commissioning/accept                   tryb przyjmowania, wygasa po 15 min
-POST /commissioning/{ShortId}/admit         przyjmij węzeł PENDING spod jego adresu (§8.3)
+POST /commissioning/{ShortId}/admit         przyjmij węzeł PENDING: z adresem — spod niego (§8.3), bez adresu — przy jego następnym zgłoszeniu
 POST /commissioning/{ShortId}/factory-reset reset fabryczny węzła PENDING (§8.3)
 POST /nodes/{uid}/remove                     forget the node; {"force": true} does not wait (§8.4)
 POST /nodes/{uid}/enumerate                  read the node again (§8.4)
@@ -1418,16 +1426,13 @@ Jak go spłacić, opisuje [`README.md`](README.md) § Raspberry Pi.
 
 | Co | Dlaczego niesprawdzone |
 |---|---|
-| **SocketCAN** | `AF_CAN`, `bind()`, nieblokujący `recv` i `ENOBUFS` znamy z dokumentacji; na macOS ten kod **nigdy się nie wykonał** — jest za `getattr(socket, "AF_CAN", -1)` |
-| **własne ramki** | gniazdo ich nie odbiera, więc podgląd połknie komendę huba (§4.2); wiemy, nie widzieliśmy |
-| **opóźnienie na RPi** | 22 µs zmierzone na magistrali w procesie, bez ani jednego wywołania systemowego |
-| **`bus-off` i błędy magistrali** | `VirtualBus` sortuje kolejkę, zamiast przegrywać arbitraż bit po bicie (**H4**) |
-| **`fsync` na karcie SD** | dziesiątki do setek ms; dlatego zapis jest w wątku STORE (§5.2). Writing `joined` to the file happens on CORE, once per joined node — the same as every write from the API; a wave of forty joins is forty small writes, not measured on the card |
-| **a restart with nodes from the file** (§8.6) | tested in-process and once on `--udp` with `lagun-sim`; on the RPi: `lagun-hub run`, nodes admitted, `Ctrl-C`, `lagun-hub run`, `G` at once in the view |
-| **zegar** | RPi bez RTC wstaje w 1970 i wraca do teraz po `ntp` |
-| **wiele magistral** | zaprojektowane i skompilowane, ale każdy test używa jednej |
-| **a SocketCAN bus going down** (§9.3) | tested on a fake `/sys` and a fake socket only (`zadania/zrobione/BUG-04.md`). On the RPi: `ip link set can0 down` under traffic → `FAILURE`, back within ~1 s; the same without the sudo rule → `GAVE UP` at once, then `up` by hand → working again; "apply" in `Buses` → no alarm; start with `can0` down; a USB adapter out and back in → socket reopened. Also to confirm: `send` while down gives `ENETDOWN` every time, and why the hub saw `ENETDOWN` right at start on 2026-10-06 (a bare `bind` to a down interface should not give it) |
 | **magistrala przez USR-CAN315** | sterownik konfiguracyjny jest (`drivers/usr_can315/`), transportu ramek `PROTOL` po TCP nie ma — `zadania/FEAT-10.md` |
+
+Checked on the Raspberry Pi by the user and working (2026-10-19), so removed from this
+table: SocketCAN (`AF_CAN`, non-blocking `recv`, `ENOBUFS`), the hub's own frames, latency
+on the RPi, `bus-off` and bus errors, `fsync` on the SD card (including `joined` writes),
+a restart with nodes from the file (§8.6), the clock without an RTC, several buses, and a
+SocketCAN bus going down (§9.3, `zadania/zrobione/BUG-04.md`).
 
 ### 14.2 Adapter MQTT i Home Assistant
 

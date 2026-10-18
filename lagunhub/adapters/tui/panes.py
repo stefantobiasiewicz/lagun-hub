@@ -198,7 +198,9 @@ def _joining(state: State) -> Pane:
                     f"0x{r.short_id:08X}",
                     r.node_class,
                     _addr(r.address),
-                    r.state,
+                    # Admitted and waiting for its next announcement — a minute at most
+                    # (zadania/zrobione/FEAT-15.md); without it the row read PENDING as before.
+                    "PENDING → ADMITTED" if r.admitting else r.state,
                     r.uid or MISSING,
                 ),
                 GOOD if r.uid else DIM,
@@ -410,6 +412,18 @@ def _joining_detail(state: State) -> Pane:
             "a lost or old database, or a module used elsewhere.",
             "It does not get in by itself, not even with joining open: decide.",
         ]
+    elif isinstance(selected, JoinView) and selected.admitting:
+        prose += [
+            "",
+            "Admitted: it gets an address at its next announcement — within a minute.",
+            "Joining stays closed; other waiting nodes still wait.",
+        ]
+    elif isinstance(selected, JoinView) and selected.state == "PENDING" and not selected.address:
+        prose += [
+            "",
+            "This node announces itself and gets no address — joining is closed.",
+            "y admits this one alone; a opens joining for every waiting node.",
+        ]
     elif isinstance(selected, JoinView) and selected.uid is None and not selected.address:
         prose += [
             "",
@@ -568,6 +582,9 @@ def context_keys(state: State) -> tuple[tuple[str, str], ...]:
                 ("X", "reset to factory settings"),
                 ("B", "block"),
             )
+        waiting = isinstance(selected, JoinView) and selected.state == "PENDING"
+        if waiting and isinstance(selected, JoinView) and not selected.admitting:
+            return (("y", "admit at its next announcement"), ("a", "open joining for 15 min"))
         if isinstance(selected, JoinView) and selected.state == "BLOCKED" and selected.uid:
             return (("B", "unblock"), ("a", "open joining for 15 min"))
         return (("a", "open joining for 15 min"),)

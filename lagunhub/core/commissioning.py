@@ -44,6 +44,10 @@ class Commissioning:
         self._clock = clock
         self._accept_until: float = 0.0
         self._timer: Handle | None = None
+        self._chosen: dict[int, float] = {}
+        """`ShortId` → until when: pending nodes without an address the operator admitted
+        one by one (`admit`). Few, and each spent at its node's next announcement or
+        expired then — so no timer of its own."""
 
         self.assigned = 0
         self.readmitted = 0
@@ -71,6 +75,26 @@ class Commissioning:
     def _close(self) -> None:
         self._accept_until = 0.0
         self._timer = None
+
+    # --- one chosen node ------------------------------------------------------
+
+    def admit(self, short_id: int, duration: float = ACCEPT_WINDOW) -> None:
+        """Let in **this one** pending node without an address, the mode staying closed
+        (06-cykl-zycia-urzadzenia.md §2.1; zadania/zrobione/FEAT-15.md).
+
+        The address goes out at the node's **next announcement**, not now. A node waits
+        for an ASSIGNMENT only a moment after announcing (03-adresacja.md §5) — ours
+        takes one any time it has no address, but the specification does not promise
+        that, and another implementation may not. The price is at most a minute: an
+        unaddressed node announces itself at least that often, without end (§5.6). The
+        choice expires as the mode does, so a node unplugged meanwhile does not come in
+        unasked an hour later.
+        """
+        self._chosen[short_id] = self._clock() + duration
+
+    def admitting(self, short_id: int) -> bool:
+        """Whether this node is chosen and the choice still holds."""
+        return self._clock() < self._chosen.get(short_id, 0.0)
 
     # --- announcement ---------------------------------------------------------
 
@@ -113,7 +137,9 @@ class Commissioning:
             self._assign(bus, record, record.address)
             return
 
-        if not self.accepting:
+        chosen = self.admitting(short_id)
+        until = self._chosen.pop(short_id, 0.0)  # spent now, or expired — either way gone
+        if not self.accepting and not chosen:
             # A removed node lands here too: removing forgets its record, so it is as
             # unknown as one never seen (06-cykl-zycia-urzadzenia.md §6).
             record.state = NodeState.PENDING
@@ -122,6 +148,10 @@ class Commissioning:
 
         address = self.installation.addresses.allocate(node_class)
         if address is None:
+            if chosen:
+                # A full block is not the operator changing their mind: the choice waits
+                # for the next announcement, as long as it holds.
+                self._chosen[short_id] = until
             self.deferred += 1
             return
         self.assigned += 1

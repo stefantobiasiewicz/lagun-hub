@@ -978,6 +978,11 @@ class TestStrangers:
         _run(state)
         assert ("admit", (0xAABBCCDD,)) in _fake(state).calls
 
+    def test_an_admitted_one_says_so_until_it_gets_in(self, state: State) -> None:
+        self.joining(state, JoinView(0xAABBCCDD, "CONTROL", state="PENDING", admitting=True))
+        assert "PENDING → ADMITTED" in panes.items(state).rows[0].cells
+        assert "next announcement" in " ".join(panes.details(state).note)
+
     def test_x_resets_after_enter_and_esc_does_not(self, state: State) -> None:
         """The one action neither the hub nor the file can undo — guarded as removing a
         node is, by a window that names it, not by retyping the ShortId (CR-07, K2)."""
@@ -993,12 +998,14 @@ class TestStrangers:
         _run(state)
         assert ("factory_reset", (0xAABBCCDD,)) in _fake(state).calls
 
-    def test_a_node_waiting_to_join_is_not_admitted_this_way(self, state: State) -> None:
-        """Without an address the accepting mode is its road in, not `y`."""
+    def test_y_admits_a_node_waiting_to_join_at_its_next_announcement(self, state: State) -> None:
+        """Without an address `y` admits this one node only — the mode stays closed
+        (zadania/zrobione/FEAT-15.md). Before, the mode was its only road in."""
         self.joining(state, JoinView(0xAABBCCDD, "CONTROL", state="PENDING"))
         app.key(state, ord("y"))
         _run(state)
-        assert not any(call[0] == "admit" for call in _fake(state).calls)
+        assert ("admit", (0xAABBCCDD,)) in _fake(state).calls
+        assert not any(call[0] == "accept_new" for call in _fake(state).calls)
 
 
 class TestNodeLifecycle:

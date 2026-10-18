@@ -226,15 +226,25 @@ def _stranger(state: State) -> JoinView | None:
 
 
 def _admit(state: State) -> None:
-    row = _stranger(state)
-    if row is None:
-        state.say("! choose a PENDING node that has an address")
+    """`y` on a pending node — with an address it is enumerated there, without one it
+    alone gets an address at its next announcement, the mode staying closed
+    (zadania/zrobione/FEAT-15.md)."""
+    selected = state.selected()
+    if (
+        state.section is not Section.JOINING
+        or not isinstance(selected, JoinView)
+        or selected.state != "PENDING"
+    ):
+        state.say("! choose a PENDING node")
         return
+    row = selected
 
     def task() -> str:
         state.hub.admit(row.short_id)
         state.reload()
-        return f"0x{row.short_id:08X} admitted at 0x{row.address:03X} — enumerating"
+        if row.address:
+            return f"0x{row.short_id:08X} admitted at 0x{row.address:03X} — enumerating"
+        return f"0x{row.short_id:08X} admitted — it gets an address at its next announcement"
 
     state.worker.submit(task)
 

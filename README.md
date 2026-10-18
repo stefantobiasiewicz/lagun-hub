@@ -81,7 +81,8 @@ in PyCharm.
 
 To take a device out and plug it in again: `X` on the node in the view removes it — the
 simulator acknowledges the factory reset, restarts without an address and waits as
-`PENDING` in **joining**; `a` there admits it again. Removing also takes the node's entry
+`PENDING` in **joining**; `y` on it admits that one node at its next announcement, `a`
+opens joining for every waiting node. Removing also takes the node's entry
 and its bindings out of the (temporary) configuration. `B` blocks a node instead — the hub
 keeps it and ignores it — and `E` reads it again (`ARCHITEKTURA.md` §8.4).
 

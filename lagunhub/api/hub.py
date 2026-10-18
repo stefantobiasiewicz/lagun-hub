@@ -321,12 +321,22 @@ class HubApi:
         return self._ask(open_bus)
 
     def admit(self, short_id: int) -> CommissioningView:
-        """Let in a node found under an address the hub did not know
-        (06-cykl-zycia-urzadzenia.md §2.3). It keeps that address and goes through
-        enumeration like any newly joined node."""
+        """Let in one pending node.
+
+        **With an address** — found under one the hub did not know
+        (06-cykl-zycia-urzadzenia.md §2.3): it keeps that address and goes through
+        enumeration like any newly joined node.
+
+        **Without one** — waiting to join while the mode is closed (§2.1;
+        zadania/zrobione/FEAT-15.md): this node alone gets an address, at its next announcement;
+        the mode stays closed, so the other pending nodes stay pending.
+        """
 
         def admit_it(inst: Installation) -> CommissioningView:
-            record = self._stranger(inst, short_id)
+            record = self._pending(inst, short_id)
+            if not record.address:
+                self.core.commissioning.admit(short_id)
+                return self._commissioning(inst)
             record.state = NodeState.JOINED
             self.core.enumeration.start(record)
             self.core.touch()
@@ -994,6 +1004,7 @@ class HubApi:
                     state=record.state.name,
                     uid=bytes(record.uid).hex() if record.uid else None,
                     last_seen=record.last_seen or None,
+                    admitting=self.core.commissioning.admitting(record.short_id),
                 )
                 for record in sorted(inst.records.values(), key=lambda r: r.short_id)
             ),
@@ -1212,9 +1223,8 @@ class HubApi:
                 return uid
         raise ApiError(Problem.NOT_FOUND, f"there is no node {ref!r}")
 
-    def _stranger(self, inst: Installation, short_id: int) -> JoinRecord:
-        """A pending node **with an address** — one found by `Strangers`. A pending node
-        without one is waiting to join, and the accepting mode is its road in."""
+    def _pending(self, inst: Installation, short_id: int) -> JoinRecord:
+        """A pending node, with an address or without."""
         record = inst.records.get(short_id)
         if record is None:
             raise ApiError(Problem.NOT_FOUND, f"the hub has never seen ShortId 0x{short_id:08X}")
@@ -1222,11 +1232,17 @@ class HubApi:
             raise ApiError(
                 Problem.INVALID, f"ShortId 0x{short_id:08X} is {record.state.name}, not PENDING"
             )
+        return record
+
+    def _stranger(self, inst: Installation, short_id: int) -> JoinRecord:
+        """A pending node **with an address** — one found by `Strangers`. Without one it
+        has no address to reset; `admit` lets it in instead."""
+        record = self._pending(inst, short_id)
         if not record.address:
             raise ApiError(
                 Problem.INVALID,
-                f"ShortId 0x{short_id:08X} has no address — it is waiting to join; "
-                f"open the accepting mode instead",
+                f"ShortId 0x{short_id:08X} has no address — it is waiting to join, "
+                f"there is nothing to reset; admit it or open the accepting mode",
             )
         return record
 

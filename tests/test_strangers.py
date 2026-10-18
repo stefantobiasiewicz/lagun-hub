@@ -205,7 +205,9 @@ class TestOperator:
         assert rig.record().address == 0
         assert not rig.installation.addresses.taken(ADDRESS)
 
-    def test_only_a_pending_node_with_an_address(self) -> None:
+    def test_only_a_pending_node(self) -> None:
+        """A pending node without an address is admitted too since FEAT-15 — it alone
+        gets one at its next announcement — but has nothing to reset."""
         rig = build()
         rig.installation.record(0xDEAD_BEEF).state = NodeState.PENDING  # waiting to join
         api = self.api(rig)
@@ -213,7 +215,8 @@ class TestOperator:
         with pytest.raises(ApiError) as missing:
             api.admit(0x0BAD_F00D)
         with pytest.raises(ApiError) as unaddressed:
-            api.admit(0xDEAD_BEEF)
+            api.factory_reset(0xDEAD_BEEF)
 
         assert missing.value.problem == Problem.NOT_FOUND
         assert unaddressed.value.problem == Problem.INVALID
+        assert api.admit(0xDEAD_BEEF).known[0].admitting
