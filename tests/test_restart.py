@@ -176,7 +176,7 @@ class TestAfterRestart:
         self, clock: Clock, tmp_path: Path, joined: tuple[Hub, int]
     ) -> None:
         """The binding wizard straight after a restart: "the dial has no endpoints" until
-        somebody turned it (zadania/BUG-09.md). Asked with `describe`, the view reads the
+        somebody turned it (zadania/zrobione/BUG-09.md). Asked with `describe`, the view reads the
         descriptor first, as a command does; asked without, it does not — refreshing the
         view must never wait on a silent node."""
         hub = _restart(clock, joined[0], tmp_path / "after")

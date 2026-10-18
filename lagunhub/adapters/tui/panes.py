@@ -215,7 +215,7 @@ def _health(state: State) -> Pane:
 
 
 def _buses(state: State) -> Pane:
-    """Every bus in `hub.yaml` and the hardware under it (zadania/FEAT-01.md).
+    """Every bus in `hub.yaml` and the hardware under it (zadania/zrobione/FEAT-01.md).
 
     `OPEN` says whether the hub has a socket on it in this run — a bus left out at start
     is here too, because that is where a person has to look.

@@ -49,7 +49,7 @@ def test_without_socketcan_it_says_outright_what_to_do() -> None:
         SocketCanBus("can0")
 
 
-# --- frames that are not LagunBus's (zadania/BUG-10.md) -------------------------
+# --- frames that are not LagunBus's (zadania/zrobione/BUG-10.md) -------------------------
 
 CAN_RTR_FLAG = 0x4000_0000
 CAN_ERR_FLAG = 0x2000_0000

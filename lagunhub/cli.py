@@ -383,7 +383,7 @@ def _bring_up_buses(
     configs: list[BusConfig],
 ) -> tuple[list[Bus], list[str], BusWatch | None]:
     """Set every SocketCAN interface up as the file says, then open the sockets
-    (zadania/FEAT-01.md, R3). What the hub cannot do itself comes back as issues and the
+    (zadania/zrobione/FEAT-01.md, R3). What the hub cannot do itself comes back as issues and the
     hub starts anyway — `lagunhub/buses.py` says why. Without SocketCAN on this machine
     there is nothing to set up, and opening raises `RuntimeError` with its own sentence.
 

@@ -19,7 +19,7 @@ CAN_EFF_FLAG: Final = 0x8000_0000
 """Extended identifier. LagunBus uses nothing else."""
 
 CAN_RTR_FLAG: Final = 0x4000_0000
-"""Remote transmission request — LagunBus has none (zadania/BUG-10.md)."""
+"""Remote transmission request — LagunBus has none (zadania/zrobione/BUG-10.md)."""
 
 CAN_ERR_FLAG: Final = 0x2000_0000
 """An error frame from the controller — only with an error mask set, which the hub does
@@ -141,7 +141,7 @@ def unpack(raw: bytes) -> Frame | None:
     The filter on the socket already keeps standard and remote frames out; this check is
     what holds without it — before it, an RTR frame kept its flag in the identifier,
     `Frame` refused 30 bits with `ValueError`, and that ended the RX thread
-    (zadania/BUG-10.md). A standard 11-bit frame was worse: read quietly as a LagunBus
+    (zadania/zrobione/BUG-10.md). A standard 11-bit frame was worse: read quietly as a LagunBus
     identifier.
     """
     if len(raw) < FRAME_SIZE:

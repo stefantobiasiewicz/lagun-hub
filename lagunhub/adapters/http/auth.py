@@ -63,7 +63,7 @@ def matches(expected: str, given: str | None) -> bool:
     if not given:
         return False
     # `compare_digest` takes `str` in ASCII only and raises `TypeError` otherwise — so a
-    # header with `é` dropped the connection instead of getting 401 (zadania/BUG-10.md).
+    # header with `é` dropped the connection instead of getting 401 (zadania/zrobione/BUG-10.md).
     # As UTF-8 bytes any text compares, still in constant time.
     return hmac.compare_digest(expected.encode("utf-8"), given.encode("utf-8"))
 

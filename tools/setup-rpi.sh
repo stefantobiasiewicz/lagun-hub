@@ -37,7 +37,7 @@ fi
 
 echo "== permission to set the CAN interfaces up"
 # The hub brings can0… to its entry in hub.yaml at every start (`ip link`, through
-# `sudo -n`) — that is what makes starting it one command (zadania/FEAT-01.md, R3, R5).
+# `sudo -n`) — that is what makes starting it one command (zadania/zrobione/FEAT-01.md, R3, R5).
 # `ip link set` needs root, the hub runs as this user, so it gets exactly that and no
 # more: a rule for `ip link set can*`. Not CAP_NET_ADMIN on the interpreter (every
 # Python script would get it) and not a systemd unit (the hub runs in a shell).

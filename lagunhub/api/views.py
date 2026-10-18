@@ -194,7 +194,7 @@ class ChangeView:
 
 @dataclass(frozen=True, slots=True)
 class BusSetupView:
-    """A bus from `hub.yaml` and the hardware under it (zadania/FEAT-01.md).
+    """A bus from `hub.yaml` and the hardware under it (zadania/zrobione/FEAT-01.md).
 
     Separate from `BusView`: that one is the **traffic** of a bus the hub has open, this
     one is its **configuration**, for every bus in the file — the ones left out at start

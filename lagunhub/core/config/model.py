@@ -33,7 +33,7 @@ MAX_BITRATE: Final = 1_000_000
 
 class BusKind(Enum):
     """What the hub talks to on the way to a bus — named after the **device** (its
-    contract), not after the medium (zadania/FEAT-01.md, R4, R6).
+    contract), not after the medium (zadania/zrobione/FEAT-01.md, R4, R6).
 
     `socketcan` is any CAN interface the kernel has — an MCP2518FD on SPI, a USB stick,
     a `vcan` for trials — all spoken to with `ip link` (`lagunhub.drivers.socketcan`).

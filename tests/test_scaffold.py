@@ -74,7 +74,7 @@ class TestContents:
             assert len(comments) >= 3, name
 
     def test_the_bus_is_written_with_its_kind(self, tmp_path: Path) -> None:
-        """The shape from zadania/FEAT-01.md (R6). There used to be an `ip link` command
+        """The shape from zadania/zrobione/FEAT-01.md (R6). There used to be an `ip link` command
         in a comment here for a person to copy; since the hub sets the interface up by
         itself (R3) there is nothing to copy."""
         scaffold.init(tmp_path, channel="can1", bitrate=250_000)

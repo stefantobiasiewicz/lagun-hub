@@ -17,7 +17,7 @@ index and not to its state. Only ``OSError`` is caught: a bug in the binding eng
 to surface, not be swallowed.
 
 A ``ValueError`` from ``recv`` — a frame the bus could not decode — is counted the same
-way (zadania/BUG-10.md, R2). Before, one RTR frame on SocketCAN ended the thread; the
+way (zadania/zrobione/BUG-10.md, R2). Before, one RTR frame on SocketCAN ended the thread; the
 bus now skips such frames itself, and this is what holds for a bus that does not.
 """
 

@@ -230,7 +230,7 @@ class HubApi:
 
     def node(self, ref: str, *, describe: bool = False) -> NodeView:
         """One node. `describe` reads its descriptor first when the hub has not yet —
-        a node from the file after a restart (zadania/BUG-09.md); what needs its
+        a node from the file after a restart (zadania/zrobione/BUG-09.md); what needs its
         endpoints asks for it, a refresh of the view does not, so a silent node cannot
         hold the view up."""
 
@@ -263,7 +263,7 @@ class HubApi:
     def commissioning(self) -> CommissioningView:
         return self._ask(self._commissioning)
 
-    # --- buses (zadania/FEAT-01.md) ------------------------------------------------
+    # --- buses (zadania/zrobione/FEAT-01.md) ------------------------------------------------
     #
     # The driver runs on the CALLER's thread, not on CORE: `ip` is a subprocess and may
     # take seconds, CORE answers nodes in milliseconds. From CORE comes only what is

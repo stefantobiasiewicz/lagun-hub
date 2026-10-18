@@ -37,7 +37,7 @@ class Link:
     clock: int = 0
     """The controller's clock in Hz — for a person reading ``info``; nothing compares it.
     Whether it matches the crystal is a question about ``config.txt``, which is not the
-    hub's (zadania/FEAT-01.md, R4)."""
+    hub's (zadania/zrobione/FEAT-01.md, R4)."""
     txqueuelen: int = 0
     state: str = ""
     """``ERROR-ACTIVE``, ``ERROR-PASSIVE``, ``BUS-OFF``, ``STOPPED``…"""

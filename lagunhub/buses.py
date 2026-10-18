@@ -1,6 +1,6 @@
 """Buses at start: set the hardware up as the file says, then open the sockets.
 
-Starting the hub is **one command** and the hub copes by itself (zadania/FEAT-01.md,
+Starting the hub is **one command** and the hub copes by itself (zadania/zrobione/FEAT-01.md,
 R3): after a reboot of the Raspberry Pi ``can0`` is down and has no bitrate, and it used
 to take ``sudo ./tools/can-up.sh can0 500000`` before ``lagun-hub run``. Now the hub
 asks the driver for the difference between the interface and ``hub.yaml`` and carries

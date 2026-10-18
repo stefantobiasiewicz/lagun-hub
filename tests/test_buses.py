@@ -1,4 +1,4 @@
-"""Setting buses up at start — the hub's side of zadania/FEAT-01.md, R3 and R5."""
+"""Setting buses up at start — the hub's side of zadania/zrobione/FEAT-01.md, R3 and R5."""
 
 from __future__ import annotations
 

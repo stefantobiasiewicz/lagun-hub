@@ -53,7 +53,7 @@ MAX_BODY: Final = 64 * 1024
 TIMEOUT: Final = 30.0
 """How long a connection may stay silent — reading a request or writing a response —
 before its thread is let go. Without it a client that opens a connection and says
-nothing holds a thread for good, token or no token (zadania/BUG-10.md, R8). An SSE stream
+nothing holds a thread for good, token or no token (zadania/zrobione/BUG-10.md, R8). An SSE stream
 is not touched: it writes a heartbeat every `HEARTBEAT` seconds."""
 
 _STREAMS: Final[dict[str, Callable[[HubApi], AbstractContextManager[Stream[Any, Any]]]]] = {
@@ -123,7 +123,7 @@ class Request:
 
     def flag(self, name: str) -> bool:
         """A JSON `true`/`false` and nothing else: `bool("false")` is `True`, and that
-        was a forced removal (zadania/BUG-10.md, R5)."""
+        was a forced removal (zadania/zrobione/BUG-10.md, R5)."""
         value = self.field(name, False)
         if not isinstance(value, bool):
             raise ApiError(Problem.INVALID, f"{name} is to be true or false, not {value!r}")
@@ -276,7 +276,7 @@ def routes(api: HubApi) -> list[Route]:
         ("GET", re.compile(r"^/health$"), lambda r: Response(body=api.health())),
         ("GET", re.compile(r"^/buses$"), lambda r: Response(body=api.buses())),
         # Per kind, because each kind is its own contract: `socketcan` has plan and
-        # apply; `usr-can315` will add discovery and joining (zadania/FEAT-01.md).
+        # apply; `usr-can315` will add discovery and joining (zadania/zrobione/FEAT-01.md).
         (
             "GET",
             re.compile(r"^/buses/socketcan/([^/]+)$"),
@@ -424,7 +424,7 @@ def _make_handler(server: HubServer) -> type[BaseHTTPRequestHandler]:
             if not self._authorised(query, stream=stream):
                 server.rejected += 1
                 # The body, if any, is not read — left there it would be read as the
-                # next request on this connection (zadania/BUG-10.md, R6).
+                # next request on this connection (zadania/zrobione/BUG-10.md, R6).
                 self.close_connection = True
                 self._send(HTTPStatus.UNAUTHORIZED, {"problem": "unauthorized"})
                 return
@@ -465,7 +465,7 @@ def _make_handler(server: HubServer) -> type[BaseHTTPRequestHandler]:
             """A header, or — for a stream only — a query parameter. The parameter is
             needed because the browser’s `EventSource` cannot set a header, and for that
             reason only: a token in a URL lands in history and logs, so it opens nothing
-            else (zadania/BUG-10.md, R7)."""
+            else (zadania/zrobione/BUG-10.md, R7)."""
             header = self.headers.get("Authorization", "")
             if header.startswith("Bearer "):
                 given: str | None = header[7:]

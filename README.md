@@ -372,7 +372,7 @@ The token as `?token=` works for the streams only (`/events`, `/frames`) — the
 browser's `EventSource` cannot set a header; everything else takes the header, so the
 token does not land in URLs. `?describe=1` on a node reads its descriptor first when
 the hub has not yet — a node from the file right after a restart; a silent node then
-answers `504` (`zadania/BUG-09.md`, `zadania/BUG-10.md`).
+answers `504` (`zadania/zrobione/BUG-09.md`, `zadania/zrobione/BUG-10.md`).
 
 Dwa wiersze odpowiedzi warto zobaczyć od razu. Pierwszy: `matches` przy każdym
 atrybucie mówi, czy węzeł ma to, co stoi w pliku — rozjazd między konfiguracją

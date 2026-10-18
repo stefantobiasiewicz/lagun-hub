@@ -541,7 +541,7 @@ commissioning:
 `vcan` do prób), wszystkie przez `ip link`. Adapter USR-CAN315 dojdzie jako `usr-can315`,
 **nie** `ethernet` — inne pudełko w Ethernecie przyszłoby z innym kontraktem (inne
 komendy, inny format ramek). Do tego czasu nieznany `kind` jest błędem konfiguracji, a nie wpisem, który się wczytuje i nic nie wozi
-([`zadania/FEAT-01.md`](../zadania/FEAT-01.md)). Kanał użyty dwa razy też jest błędem —
+([`zadania/zrobione/FEAT-01.md`](../zadania/zrobione/FEAT-01.md)). Kanał użyty dwa razy też jest błędem —
 dwa gniazda na jednym interfejsie słyszą każdą ramkę podwójnie.
 
 Nazwa magistrali (`can0`, ale też `parter`) jest **wyłącznie dla człowieka i dziennika** —

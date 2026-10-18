@@ -271,7 +271,7 @@ def test_a_dead_rx_thread_lands_in_the_issues(tmp_path) -> None:  # type: ignore
 
 def test_a_frame_the_bus_cannot_decode_does_not_end_reception(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """A `ValueError` from `recv` is the bus's fault, counted against it like `OSError`
-    (zadania/BUG-10.md, R2) — and only around `recv`: the binding engine's own errors
+    (zadania/zrobione/BUG-10.md, R2) — and only around `recv`: the binding engine's own errors
     still surface."""
     inst, hub = rig(tmp_path)
     real = hub.recv
@@ -313,7 +313,7 @@ _THREAD_INTERNALS = frozenset(dir(threading.Thread)) | {
 @pytest.mark.parametrize("cls", [RxThread, CoreThread, BusWatch])
 def test_no_hub_thread_shadows_what_threading_uses(cls: type[threading.Thread]) -> None:
     """`self._stop = Event()` turned `join()` and `is_alive()` into `TypeError` on 3.12 —
-    the very calls that report a dead thread (zadania/BUG-10.md, R3)."""
+    the very calls that report a dead thread (zadania/zrobione/BUG-10.md, R3)."""
     import ast
     import inspect
 

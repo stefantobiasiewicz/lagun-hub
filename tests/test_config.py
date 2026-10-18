@@ -240,7 +240,7 @@ class TestStaticValidation:
 
 
 class TestBuses:
-    """A bus entry: `kind` plus the fields of that kind (zadania/FEAT-01.md, R6)."""
+    """A bus entry: `kind` plus the fields of that kind (zadania/zrobione/FEAT-01.md, R6)."""
 
     @staticmethod
     def hub(tmp_path: Path, buses: str) -> Path:

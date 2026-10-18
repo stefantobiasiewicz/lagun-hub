@@ -699,7 +699,7 @@ class TestQuestionChain:
 
     def test_the_wizard_reads_what_each_node_is(self, state: State) -> None:
         """The source and the target alike — after a restart the hub has not read them
-        yet, and the wizard used to say "no endpoint" (zadania/BUG-09.md)."""
+        yet, and the wizard used to say "no endpoint" (zadania/zrobione/BUG-09.md)."""
         state.section = Section.BINDINGS
         app.key(state, ord("+"))
         assert isinstance(state.overlay, overlay.Choose)
@@ -1130,7 +1130,8 @@ class TestNodeLifecycle:
 
 class TestBuses:
     """The `Buses` section — the hardware under each bus from the file
-    (zadania/FEAT-01.md, step 6; can-drivers/docs/MAKIETY-MAGISTRALE.md, screens 1, 3, 12)."""
+    (zadania/zrobione/FEAT-01.md, step 6; can-drivers/docs/MAKIETY-MAGISTRALE.md, screens 1, 3,
+    12)."""
 
     def buses(self, state: State) -> State:
         state.worker._on_done = lambda _: None
@@ -1497,7 +1498,7 @@ class TestEditingABinding:
         assert write[1][1] == [{**self.DIAL, "to": edited}]
 
     def test_editing_reads_what_both_nodes_are(self, state: State) -> None:
-        """After a restart the hub has not read either node yet (zadania/BUG-09.md)."""
+        """After a restart the hub has not read either node yet (zadania/zrobione/BUG-09.md)."""
         fake = self._open(state, [self.DIAL])
         asked = [c[1] for c in fake.calls if c[0] == "node"]
         assert ("kitchen-dial", True) in asked

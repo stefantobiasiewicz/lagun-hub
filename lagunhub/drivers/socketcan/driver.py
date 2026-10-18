@@ -2,7 +2,7 @@
 
 The same contract as the USR-CAN315, answered from a different world: the bitrate, the
 restart delay, FD and listen-only live in **the kernel**, are set with ``ip link`` and
-are lost at every reboot. The hub sets them at start (zadania/FEAT-01.md, R3).
+are lost at every reboot. The hub sets them at start (zadania/zrobione/FEAT-01.md, R3).
 
 **The route is the kind, not the chip.** ``ip link set can0 type can bitrate 500000`` is
 the same command for an ``mcp251xfd`` on SPI, an ``mcp251x`` and a ``gs_usb`` stick, so

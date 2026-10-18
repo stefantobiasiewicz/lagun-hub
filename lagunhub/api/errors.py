@@ -47,7 +47,7 @@ class Problem(Enum):
     HARDWARE = "hardware"
     """The hardware under a bus refused or did not answer — `ip link` without the sudo
     rule, an adapter off the network. Not a node and not the hub: the third party in
-    between (zadania/FEAT-01.md)."""
+    between (zadania/zrobione/FEAT-01.md)."""
 
 
 class ApiError(Exception):

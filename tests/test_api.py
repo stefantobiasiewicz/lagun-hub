@@ -558,7 +558,7 @@ def _without_pumping(future: Future[Any], timeout: float) -> Any:
 
 
 class TestBuses:
-    """The hardware under each bus from the file (zadania/FEAT-01.md, step 5).
+    """The hardware under each bus from the file (zadania/zrobione/FEAT-01.md, step 5).
 
     The Rig's one open bus is named `hub`, so a file naming channel `hub` is the open
     one, and `can1` stands for a bus the hub left out at start.

@@ -214,7 +214,8 @@ class TestAuthentication:
     def test_a_token_in_a_query_parameter_works_only_for_streams(self, hub: Hub) -> None:
         """The browser's `EventSource` cannot set a header — and that is the only
         reason, so a query token opens nothing else: in a URL it lands in history and
-        logs (zadania/BUG-10.md, R7). The stream itself is `test_the_stream_needs_no_header`."""
+        logs (zadania/zrobione/BUG-10.md, R7). The stream itself is
+        `test_the_stream_needs_no_header`."""
         status, _ = hub.get(f"/nodes?token={TOKEN}", token=None)
         assert status == 401
 
@@ -429,7 +430,7 @@ class TestControl:
 
 
 class TestBuses:
-    """`/buses` — the hardware under each bus from the file (zadania/FEAT-01.md)."""
+    """`/buses` — the hardware under each bus from the file (zadania/zrobione/FEAT-01.md)."""
 
     def test_the_list(self, hub: Hub) -> None:
         status, content = hub.get("/buses")
@@ -536,7 +537,7 @@ class TestStream:
 
 class TestDescribe:
     """`?describe=1` — the view of a node with its descriptor read first
-    (zadania/BUG-09.md); the restart case itself is in `test_restart.py`."""
+    (zadania/zrobione/BUG-09.md); the restart case itself is in `test_restart.py`."""
 
     def test_asked_to_describe(self, hub: Hub) -> None:
         status, view = hub.get("/nodes/kitchen-relay?describe=1")
@@ -549,7 +550,7 @@ class TestDescribe:
 
 class TestBadRequests:
     """A request the hub cannot take is an answer, not a dropped connection
-    (zadania/BUG-10.md, R4–R6)."""
+    (zadania/zrobione/BUG-10.md, R4–R6)."""
 
     def test_a_number_that_is_not_one(self, hub: Hub) -> None:
         status, body = hub.call("POST", "/nodes/kitchen-relay/identify", {"seconds": "abc"})
